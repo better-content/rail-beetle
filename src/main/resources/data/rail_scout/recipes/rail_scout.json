@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " C ",
+    "RFR",
+    " M "
+  ],
+  "key": {
+    "C": { "item": "minecraft:compass" },
+    "R": { "item": "minecraft:rail" },
+    "F": { "item": "minecraft:furnace" },
+    "M": { "item": "minecraft:minecart" }
+  },
+  "result": {
+    "item": "rail_scout:rail_scout"
+  }
+}

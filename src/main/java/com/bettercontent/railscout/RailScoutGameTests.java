@@ -13,6 +13,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.vehicle.Minecart;
 import net.minecraft.world.level.block.Blocks;
@@ -119,6 +120,76 @@ public final class RailScoutGameTests {
                     "Create must attach its standard minecart coupling capability to Rail Scout");
             double moved = scout.position().distanceToSqr(start.x, start.y, start.z);
             helper.assertTrue(moved < 0.01, "automatic planning brake must prevent rolling");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void scoutRejectsRidersAndUsesPoweredCollisionPriority(GameTestHelper helper) {
+        BlockPos start = helper.absolutePos(new BlockPos(4, 2, 4));
+        for (int x = 0; x <= 7; x++) placeEastWestRail(helper, start.offset(x, 0, 0));
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(start.getX() + 0.5, start.getY() + 0.0625, start.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        var pig = EntityType.PIG.create(helper.getLevel());
+        helper.assertTrue(pig != null, "test pig must create");
+        pig.setPos(scout.getX() + 0.1, scout.getY(), scout.getZ());
+        helper.getLevel().addFreshEntity(scout);
+        helper.getLevel().addFreshEntity(pig);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
+
+        helper.assertTrue(!scout.canBeRidden(), "Scout must not accept automatic mob passengers");
+        helper.assertTrue(!scout.isPushable(), "Scout must reject ordinary entity shove impulses");
+        helper.assertTrue(scout.isPoweredCart(), "Scout must receive furnace-cart collision priority");
+        helper.assertTrue(ForgeRegistries.BLOCKS.getKey(scout.getDefaultDisplayBlockState().getBlock())
+                        .equals(ResourceLocation.fromNamespaceAndPath("create", "brass_casing")),
+                "Create installations must render a brass casing in the Scout");
+        scout.control(player, ScoutControl.HALF_SPEED);
+
+        helper.runAfterDelay(20, () -> {
+            helper.assertTrue(!scout.hasPassenger(pig) && pig.getVehicle() != scout,
+                    "nearby mobs must never be collected as Scout passengers");
+            helper.assertTrue(scout.noseHeading() == Direction.EAST,
+                    "mob contact must not reverse the Scout's commanded heading");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 140)
+    public static void ordinaryMinecartImpactDoesNotReverseScout(GameTestHelper helper) {
+        BlockPos start = helper.absolutePos(new BlockPos(4, 2, 8));
+        for (int x = 0; x <= 12; x++) placeEastWestRail(helper, start.offset(x, 0, 0));
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(start.getX() + 3.5, start.getY() + 0.0625, start.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        Minecart incoming = new Minecart(helper.getLevel(),
+                start.getX() + 7.5, start.getY() + 0.0625, start.getZ() + 0.5);
+        incoming.setDeltaMovement(-0.2, 0, 0);
+        helper.getLevel().addFreshEntity(scout);
+        helper.getLevel().addFreshEntity(incoming);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
+        double initialX = scout.getX();
+        List<Double> samples = new ArrayList<>();
+        scout.control(player, ScoutControl.NORMAL_SPEED);
+        helper.onEachTick(() -> {
+            if (helper.getTick() <= 70) samples.add(scout.getX());
+            helper.assertTrue(scout.noseHeading() == Direction.EAST,
+                    "ordinary minecart impact must not reverse Forward");
+        });
+
+        helper.runAfterDelay(75, () -> {
+            helper.assertTrue(scout.getX() > initialX + 2.0,
+                    "powered collision priority must let the Scout continue east; pos=" + scout.position());
+            for (int index = 1; index < samples.size(); index++) {
+                helper.assertTrue(samples.get(index) - samples.get(index - 1) > -0.08,
+                        "ordinary minecart impact must not produce a reversing impulse");
+            }
             helper.succeed();
         });
     }

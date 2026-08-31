@@ -7,7 +7,9 @@ the crosshair and the `G` key. A Scout placed in the middle of a railway stays
 in normal driving mode instead of trying to plan from that location.
 
 The vehicle is an `AbstractMinecart`, so Create's normal minecart coupling works
-without Rail Scout owning or interpreting coupled-cart state.
+without Rail Scout owning or interpreting coupled-cart state. Create is optional:
+the visible cargo is a brass casing when Create is loaded and a copper block
+otherwise.
 
 ## Use
 
@@ -24,6 +26,8 @@ without Rail Scout owning or interpreting coupled-cart state.
 - The Scout automatically applies its hand brake between automatic phases and
   on slopes. Movement uses bounded acceleration so a Create-coupled passenger
   cart follows without position snapping or jitter from Scout-side corrections.
+- Mobs cannot board or shove the Scout. It uses powered-cart collision priority
+  against ordinary minecarts so incidental impacts do not reverse its command.
 - The default route cap is 64 rails and can be changed in the server config.
 
 The planner only traverses loaded terrain, never excavates or routes underwater,

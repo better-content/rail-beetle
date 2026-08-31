@@ -7,7 +7,7 @@
 - Base package: `com.bettercontent.railscout`
 - Java: 17
 - Minecraft/Forge: 1.20.1 / 47.4.13
-- Required runtime dependency: Create 6.0.8
+- Optional runtime integration: Create 6.0.8
 
 This is a clean implementation. Do not import, inspect, migrate, or add compatibility
 for any earlier Rail Crawler implementation or artifact.

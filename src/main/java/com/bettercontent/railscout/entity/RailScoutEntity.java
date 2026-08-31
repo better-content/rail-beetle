@@ -2,13 +2,13 @@ package com.bettercontent.railscout.entity;
 
 import com.bettercontent.railscout.RailScoutConfig;
 import com.bettercontent.railscout.RailScoutRegistries;
+import com.bettercontent.railscout.compat.CreateCompat;
 import com.bettercontent.railscout.menu.RailScoutMenu;
 import com.bettercontent.railscout.navigation.RouteProposal;
 import com.bettercontent.railscout.navigation.RouteStep;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
 import com.bettercontent.railscout.network.RailScoutNetwork;
 import com.bettercontent.railscout.network.ScoutControl;
-import com.simibubi.create.content.contraptions.minecart.capability.CapabilityMinecartController;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -16,6 +16,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.Packet;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -35,6 +36,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseRailBlock;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.RailShape;
@@ -44,6 +46,7 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.network.NetworkHooks;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -68,6 +71,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     private static final double SERVICE_DECELERATION = 0.02;
     private static final double MAX_RAIL_SPEED = 8.0 / 20.0;
     private static final double AIM_TAN = 0.03492076949;
+    private static final ResourceLocation BRASS_CASING = ResourceLocation.fromNamespaceAndPath("create", "brass_casing");
 
     private static final EntityDataAccessor<Integer> DATA_MODE = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> DATA_FORCED_BRAKE = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.BOOLEAN);
@@ -600,8 +604,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
             setDeltaMovement(Vec3.ZERO);
             setCurrentCartSpeedCapOnRail(0);
         } else setCurrentCartSpeedCapOnRail((float) MAX_RAIL_SPEED);
-        getCapability(CapabilityMinecartController.MINECART_CONTROLLER_CAPABILITY)
-                .ifPresent(controller -> controller.setStalledExternally(brake));
+        CreateCompat.setExternallyStalled(this, brake);
         automaticBrakeApplied = brake;
     }
 
@@ -760,6 +763,23 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     }
 
     @Override public Component getDisplayName() { return Component.translatable("entity.rail_scout.rail_scout"); }
+
+    @Override public boolean canBeRidden() { return false; }
+
+    @Override public boolean isPoweredCart() { return true; }
+
+    @Override public boolean isPushable() { return false; }
+
+    @Override
+    public BlockState getDefaultDisplayBlockState() {
+        return displayBlockState(ForgeRegistries.BLOCKS.getValue(BRASS_CASING));
+    }
+
+    static BlockState displayBlockState(@Nullable Block brassCasing) {
+        return brassCasing == null || brassCasing == Blocks.AIR
+                ? Blocks.COPPER_BLOCK.defaultBlockState()
+                : brassCasing.defaultBlockState();
+    }
 
     @Nullable
     @Override

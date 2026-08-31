@@ -1,8 +1,11 @@
 package com.bettercontent.railscout;
 
 import com.bettercontent.railscout.entity.ScoutMode;
+import com.bettercontent.railscout.entity.ScoutSupplies;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.level.block.state.properties.RailShape;
 import org.junit.jupiter.api.Test;
 
@@ -28,5 +31,22 @@ final class RouteGeometryTest {
         assertTrue(ScoutMode.MANUAL_REVERSE.moves());
         assertFalse(ScoutMode.PLANNING.moves());
         assertFalse(ScoutMode.PAUSED.moves());
+    }
+
+    @Test
+    void requiresTwoStraightRailsBetweenCorners() {
+        assertTrue(TerrainRoutePlanner.turnSpacingAllowed(Direction.NORTH, Direction.EAST, false, 0));
+        assertFalse(TerrainRoutePlanner.turnSpacingAllowed(Direction.NORTH, Direction.EAST, true, 0));
+        assertFalse(TerrainRoutePlanner.turnSpacingAllowed(Direction.NORTH, Direction.EAST, true, 1));
+        assertTrue(TerrainRoutePlanner.turnSpacingAllowed(Direction.NORTH, Direction.EAST, true, 2));
+        assertTrue(TerrainRoutePlanner.turnSpacingAllowed(Direction.NORTH, Direction.NORTH, true, 0));
+    }
+
+    @Test
+    void selectsOnlyRailsSupportingTheRequiredShape() {
+        EnumProperty<RailShape> straightOnly = EnumProperty.create(
+                "shape", RailShape.class, shape -> shape == RailShape.NORTH_SOUTH || shape == RailShape.EAST_WEST);
+        assertFalse(ScoutSupplies.supportsRailShape(straightOnly, RailShape.NORTH_EAST));
+        assertTrue(ScoutSupplies.supportsRailShape(straightOnly, RailShape.EAST_WEST));
     }
 }

@@ -6,7 +6,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseRailBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.RailShape;
-import net.minecraft.world.level.material.Fluids;
 
 import javax.annotation.Nullable;
 import java.util.ArrayDeque;
@@ -35,6 +34,7 @@ public final class TerrainRoutePlanner {
         private final BlockPos origin;
         private final int railCap;
         private final long generation;
+        private final Direction originHeading;
         private final ArrayDeque<Node> frontier = new ArrayDeque<>();
         private final Set<Key> visited = new HashSet<>();
         private final Map<BlockPos, Node> endpoints = new LinkedHashMap<>();
@@ -46,9 +46,10 @@ public final class TerrainRoutePlanner {
             this.origin = origin;
             this.railCap = Math.max(1, railCap);
             this.generation = generation;
-            Node root = new Node(origin, forward, 0, null, null);
+            this.originHeading = forward;
+            Node root = new Node(origin, forward, 0, null, null, false, 0);
             frontier.add(root);
-            visited.add(new Key(origin, forward));
+            visited.add(new Key(origin, forward, false, 0));
         }
 
         public boolean advance(int nodeBudget) {
@@ -63,20 +64,30 @@ public final class TerrainRoutePlanner {
                     continue;
                 }
                 for (Direction direction : Direction.Plane.HORIZONTAL) {
+                    if (current.parent == null && direction != current.incoming) {
+                        continue;
+                    }
                     if (direction == current.incoming.getOpposite()) {
                         continue;
                     }
                     for (int dy = -1; dy <= 1; dy++) {
                         BlockPos next = current.pos.relative(direction).offset(0, dy, 0);
                         Placement placement = inspect(next);
-                        if (placement == null || !geometryAllowed(current, direction, dy)) {
+                        if (placement == null
+                                || !geometryAllowed(current, direction, dy)
+                                || !adjacencyAllowed(current, next)) {
                             continue;
                         }
-                        Key key = new Key(next, direction);
+                        boolean turn = current.incoming.getAxis() != direction.getAxis();
+                        boolean hasTurn = current.hasTurn || turn;
+                        int straightSinceTurn = turn ? 0
+                                : current.hasTurn ? Math.min(2, current.straightSinceTurn + 1) : 0;
+                        Key key = new Key(next, direction, hasTurn, straightSinceTurn);
                         if (!visited.add(key)) {
                             continue;
                         }
-                        frontier.addLast(new Node(next.immutable(), direction, current.depth + 1, current, placement.supportPos));
+                        frontier.addLast(new Node(next.immutable(), direction, current.depth + 1, current,
+                                placement.supportPos, hasTurn, straightSinceTurn));
                     }
                 }
             }
@@ -104,12 +115,15 @@ public final class TerrainRoutePlanner {
                     BlockPos next = stepIndex + 1 < path.size() ? path.get(stepIndex + 1).pos : null;
                     steps.add(new RouteStep(current, shapeFor(previous, current, next), path.get(stepIndex).supportPos));
                 }
-                result.add(new RouteProposal(index, generation, endpoint.pos, steps));
+                result.add(new RouteProposal(index, generation, origin, originHeading, endpoint.pos, steps));
             }
             return List.copyOf(result);
         }
 
         private boolean geometryAllowed(Node current, Direction direction, int dy) {
+            if (!turnSpacingAllowed(current.incoming, direction, current.hasTurn, current.straightSinceTurn)) {
+                return false;
+            }
             if (dy != 0 && current.parent != null && current.incoming.getAxis() != direction.getAxis()) {
                 return false;
             }
@@ -122,31 +136,33 @@ public final class TerrainRoutePlanner {
             return true;
         }
 
+        private boolean adjacencyAllowed(Node current, BlockPos candidate) {
+            for (Direction side : Direction.Plane.HORIZONTAL) {
+                BlockPos adjacentColumn = candidate.relative(side);
+                for (int dy = -1; dy <= 1; dy++) {
+                    BlockPos adjacent = adjacentColumn.offset(0, dy, 0);
+                    if (adjacent.equals(current.pos)) {
+                        continue;
+                    }
+                    if (!level.isLoaded(adjacent)) {
+                        return false;
+                    }
+                    if (BaseRailBlock.isRail(level.getBlockState(adjacent))) {
+                        return false;
+                    }
+                    for (Node ancestor = current.parent; ancestor != null; ancestor = ancestor.parent) {
+                        if (ancestor.pos.equals(adjacent)) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
         @Nullable
         private Placement inspect(BlockPos railPos) {
-            BlockPos above = railPos.above();
-            if (!level.isLoaded(railPos) || !level.isLoaded(above) || !level.isLoaded(railPos.below(2))) {
-                return null;
-            }
-            BlockState railSpace = level.getBlockState(railPos);
-            BlockState headSpace = level.getBlockState(above);
-            if (!railSpace.isAir() || !headSpace.isAir()
-                    || railSpace.getFluidState().getType() != Fluids.EMPTY
-                    || headSpace.getFluidState().getType() != Fluids.EMPTY) {
-                return null;
-            }
-            BlockPos floor = railPos.below();
-            BlockState floorState = level.getBlockState(floor);
-            if (floorState.isFaceSturdy(level, floor, Direction.UP) && !(floorState.getBlock() instanceof BaseRailBlock)) {
-                return new Placement(null);
-            }
-            BlockPos lowerFloor = floor.below();
-            BlockState lowerState = level.getBlockState(lowerFloor);
-            if (floorState.isAir() && lowerState.isFaceSturdy(level, lowerFloor, Direction.UP)
-                    && lowerState.getFluidState().getType() == Fluids.EMPTY) {
-                return new Placement(floor.immutable());
-            }
-            return null;
+            return inspectPlacement(level, railPos);
         }
     }
 
@@ -179,6 +195,161 @@ public final class TerrainRoutePlanner {
         return RailShape.NORTH_WEST;
     }
 
+    public static boolean turnSpacingAllowed(
+            Direction incoming,
+            Direction outgoing,
+            boolean hasPreviousTurn,
+            int straightRailsSinceTurn
+    ) {
+        return incoming.getAxis() == outgoing.getAxis()
+                || !hasPreviousTurn
+                || straightRailsSinceTurn >= 2;
+    }
+
+    public static boolean isRouteStillValid(Level level, RouteProposal proposal) {
+        if (!originIsUsable(level, proposal.origin()) || !routeMetadataIsValid(proposal)) {
+            return false;
+        }
+        for (int index = 0; index < proposal.steps().size(); index++) {
+            if (!isUnbuiltStepValid(level, proposal, index)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static boolean isRouteStepStillValid(Level level, RouteProposal proposal, int stepIndex) {
+        if (stepIndex < 0 || stepIndex >= proposal.steps().size() || !routeMetadataIsValid(proposal)) {
+            return false;
+        }
+        BlockPos predecessor = stepIndex == 0
+                ? proposal.origin()
+                : proposal.steps().get(stepIndex - 1).railPos();
+        return originIsUsable(level, predecessor) && isUnbuiltStepValid(level, proposal, stepIndex);
+    }
+
+    private static boolean routeMetadataIsValid(RouteProposal proposal) {
+        List<RouteStep> steps = proposal.steps();
+        if (steps.isEmpty() || !proposal.endpoint().equals(steps.get(steps.size() - 1).railPos())) {
+            return false;
+        }
+        Direction incoming = proposal.originHeading();
+        boolean hasTurn = false;
+        int straightSinceTurn = 0;
+        BlockPos previous = proposal.origin();
+        for (int index = 0; index < steps.size(); index++) {
+            RouteStep step = steps.get(index);
+            BlockPos current = step.railPos();
+            int dx = Math.abs(current.getX() - previous.getX());
+            int dz = Math.abs(current.getZ() - previous.getZ());
+            int dy = current.getY() - previous.getY();
+            if (dx + dz != 1 || Math.abs(dy) > 1) {
+                return false;
+            }
+            Direction outgoing = horizontalDirection(previous, current);
+            if ((index == 0 && outgoing != proposal.originHeading())
+                    || outgoing == incoming.getOpposite()
+                    || !turnSpacingAllowed(incoming, outgoing, hasTurn, straightSinceTurn)) {
+                return false;
+            }
+            if (index > 0 && dy != 0 && incoming.getAxis() != outgoing.getAxis()) {
+                return false;
+            }
+            if (index > 0) {
+                BlockPos beforePrevious = index == 1
+                        ? proposal.origin()
+                        : steps.get(index - 2).railPos();
+                int previousDy = previous.getY() - beforePrevious.getY();
+                if (previousDy != 0 && incoming.getAxis() != outgoing.getAxis()) {
+                    return false;
+                }
+            }
+            BlockPos next = index + 1 < steps.size() ? steps.get(index + 1).railPos() : null;
+            if (step.shape() != shapeFor(previous, current, next)) {
+                return false;
+            }
+            boolean turn = incoming.getAxis() != outgoing.getAxis();
+            straightSinceTurn = turn ? 0 : hasTurn ? Math.min(2, straightSinceTurn + 1) : 0;
+            hasTurn |= turn;
+            incoming = outgoing;
+            previous = current;
+        }
+        return true;
+    }
+
+    private static boolean isUnbuiltStepValid(Level level, RouteProposal proposal, int stepIndex) {
+        RouteStep step = proposal.steps().get(stepIndex);
+        Placement placement = inspectPlacement(level, step.railPos());
+        if (placement == null || !java.util.Objects.equals(placement.supportPos, step.supportPos())) {
+            return false;
+        }
+        BlockPos predecessor = stepIndex == 0
+                ? proposal.origin()
+                : proposal.steps().get(stepIndex - 1).railPos();
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            BlockPos adjacentColumn = step.railPos().relative(side);
+            for (int dy = -1; dy <= 1; dy++) {
+                BlockPos adjacent = adjacentColumn.offset(0, dy, 0);
+                if (adjacent.equals(predecessor)) {
+                    continue;
+                }
+                if (!level.isLoaded(adjacent) || BaseRailBlock.isRail(level.getBlockState(adjacent))) {
+                    return false;
+                }
+                for (int earlier = 0; earlier < stepIndex - 1; earlier++) {
+                    if (proposal.steps().get(earlier).railPos().equals(adjacent)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean originIsUsable(Level level, BlockPos origin) {
+        BlockPos above = origin.above();
+        BlockPos floor = origin.below();
+        if (!level.isLoaded(origin) || !level.isLoaded(above) || !level.isLoaded(floor)) {
+            return false;
+        }
+        BlockState state = level.getBlockState(origin);
+        return BaseRailBlock.isRail(state)
+                && state.getFluidState().isEmpty()
+                && level.getFluidState(above).isEmpty()
+                && level.getFluidState(floor).isEmpty();
+    }
+
+    @Nullable
+    private static Placement inspectPlacement(Level level, BlockPos railPos) {
+        BlockPos above = railPos.above();
+        if (!level.isLoaded(railPos) || !level.isLoaded(above) || !level.isLoaded(railPos.below(2))) {
+            return null;
+        }
+        BlockState railSpace = level.getBlockState(railPos);
+        BlockState headSpace = level.getBlockState(above);
+        if (!railSpace.isAir() || !headSpace.isAir()
+                || !railSpace.getFluidState().isEmpty()
+                || !headSpace.getFluidState().isEmpty()) {
+            return null;
+        }
+        BlockPos floor = railPos.below();
+        BlockState floorState = level.getBlockState(floor);
+        if (floorState.getFluidState().isEmpty()
+                && floorState.isFaceSturdy(level, floor, Direction.UP)
+                && !(floorState.getBlock() instanceof BaseRailBlock)) {
+            return new Placement(null);
+        }
+        BlockPos lowerFloor = floor.below();
+        BlockState lowerState = level.getBlockState(lowerFloor);
+        if (floorState.isAir()
+                && floorState.getFluidState().isEmpty()
+                && lowerState.getFluidState().isEmpty()
+                && lowerState.isFaceSturdy(level, lowerFloor, Direction.UP)) {
+            return new Placement(floor.immutable());
+        }
+        return null;
+    }
+
     private static RailShape ascending(Direction direction) {
         return switch (direction) {
             case NORTH -> RailShape.ASCENDING_NORTH;
@@ -197,6 +368,14 @@ public final class TerrainRoutePlanner {
     }
 
     private record Placement(@Nullable BlockPos supportPos) {}
-    private record Key(BlockPos pos, Direction incoming) {}
-    private record Node(BlockPos pos, Direction incoming, int depth, @Nullable Node parent, @Nullable BlockPos supportPos) {}
+    private record Key(BlockPos pos, Direction incoming, boolean hasTurn, int straightSinceTurn) {}
+    private record Node(
+            BlockPos pos,
+            Direction incoming,
+            int depth,
+            @Nullable Node parent,
+            @Nullable BlockPos supportPos,
+            boolean hasTurn,
+            int straightSinceTurn
+    ) {}
 }

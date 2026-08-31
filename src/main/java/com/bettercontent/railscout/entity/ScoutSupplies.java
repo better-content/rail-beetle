@@ -5,11 +5,15 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.BaseRailBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.FallingBlock;
+import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.level.block.state.properties.RailShape;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.items.ItemStackHandler;
 
@@ -20,6 +24,10 @@ public final class ScoutSupplies {
 
     public static int countRails(ItemStackHandler inventory) {
         return count(inventory, ScoutSupplies::isRail);
+    }
+
+    public static int countRails(ItemStackHandler inventory, RailShape shape) {
+        return count(inventory, stack -> isRail(stack) && supportsRailShape(stack, shape));
     }
 
     public static int countSupports(ItemStackHandler inventory) {
@@ -38,6 +46,11 @@ public final class ScoutSupplies {
     @Nullable
     public static BlockItem takeRail(ItemStackHandler inventory) {
         return takeBlock(inventory, ScoutSupplies::isRail);
+    }
+
+    @Nullable
+    public static BlockItem takeRail(ItemStackHandler inventory, RailShape shape) {
+        return takeBlock(inventory, stack -> isRail(stack) && supportsRailShape(stack, shape));
     }
 
     @Nullable
@@ -61,9 +74,26 @@ public final class ScoutSupplies {
     }
 
     public static boolean isRail(ItemStack stack) {
-        return stack.is(RailScoutTags.USABLE_RAILS)
-                && stack.getItem() instanceof BlockItem blockItem
-                && blockItem.getBlock() instanceof BaseRailBlock;
+        if (!(stack.getItem() instanceof BlockItem blockItem)
+                || !(blockItem.getBlock() instanceof BaseRailBlock)) {
+            return false;
+        }
+        return stack.is(ItemTags.RAILS)
+                || stack.is(RailScoutTags.FORGE_RAILS)
+                || stack.is(RailScoutTags.USABLE_RAILS)
+                || blockItem.getBlock().defaultBlockState().is(BlockTags.RAILS)
+                || blockItem.getBlock().defaultBlockState().is(RailScoutTags.FORGE_RAIL_BLOCKS)
+                || blockItem.getBlock().defaultBlockState().is(RailScoutTags.USABLE_RAIL_BLOCKS);
+    }
+
+    public static boolean supportsRailShape(ItemStack stack, RailShape shape) {
+        return stack.getItem() instanceof BlockItem blockItem
+                && blockItem.getBlock() instanceof BaseRailBlock rail
+                && supportsRailShape(rail.getShapeProperty(), shape);
+    }
+
+    public static boolean supportsRailShape(Property<RailShape> property, RailShape shape) {
+        return property.getPossibleValues().contains(shape);
     }
 
     public static boolean isSupport(ItemStack stack) {

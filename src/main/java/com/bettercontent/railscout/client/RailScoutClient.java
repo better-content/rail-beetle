@@ -30,9 +30,15 @@ import java.util.Map;
 
 public final class RailScoutClient {
     private static final int[][] COLORS = {
-            {40, 220, 255}, {90, 255, 120}, {255, 190, 55}, {245, 95, 220},
-            {105, 145, 255}, {255, 245, 90}, {255, 95, 95}
+            {101, 184, 176}, {143, 163, 91}, {214, 154, 69}, {168, 115, 149},
+            {112, 141, 177}, {212, 192, 106}, {184, 98, 82}
     };
+    private static final int[] RUST = {145, 102, 72};
+    private static final int[] WOOD = {126, 98, 67};
+    private static final int[] PALE_WOOD = {188, 151, 96};
+    private static final int[] BRASS = {226, 178, 76};
+    private static final int[] CHARCOAL = {35, 28, 23};
+    private static final double OCCLUDED_RANGE_SQR = 32.0 * 32.0;
     private static final KeyMapping SELECT_ROUTE = new KeyMapping(
             "key.rail_scout.select_route", GLFW.GLFW_KEY_G, "key.categories.rail_scout");
 
@@ -123,48 +129,122 @@ public final class RailScoutClient {
             PoseStack pose = event.getPoseStack();
             pose.pushPose();
             pose.translate(-camera.x, -camera.y, -camera.z);
-            VertexConsumer consumer = minecraft.renderBuffers().bufferSource().getBuffer(RenderType.lines());
             Matrix4f matrix = pose.last().pose();
             Matrix3f normal = pose.last().normal();
+
+            if (selected != null) {
+                ClientRouteStore.RouteSet set = ClientRouteStore.routes().get(selected.entityId());
+                if (set != null) {
+                    VertexConsumer occluded = minecraft.renderBuffers().bufferSource()
+                            .getBuffer(RouteRenderTypes.OCCLUDED_LINES);
+                    RouteOverlayGeometry.Track geometry = RouteOverlayGeometry.build(selected.route());
+                    int[] accent = COLORS[Math.floorMod(selected.route().id(), COLORS.length)];
+                    for (RouteOverlayGeometry.Segment segment : geometry.rails()) {
+                        if (segment.midpoint().distanceToSqr(camera) <= OCCLUDED_RANGE_SQR) {
+                            line(occluded, matrix, normal, segment.from(), segment.to(), accent, 0.30f);
+                        }
+                    }
+                    for (RouteOverlayGeometry.Segment segment : geometry.sleepers()) {
+                        if (segment.midpoint().distanceToSqr(camera) <= OCCLUDED_RANGE_SQR) {
+                            line(occluded, matrix, normal, segment.from(), segment.to(), accent, 0.20f);
+                        }
+                    }
+                    for (RouteOverlayGeometry.Segment segment : geometry.pennant()) {
+                        if (segment.midpoint().distanceToSqr(camera) <= OCCLUDED_RANGE_SQR) {
+                            line(occluded, matrix, normal, segment.from(), segment.to(), accent, 0.34f);
+                        }
+                    }
+                    minecraft.renderBuffers().bufferSource().endBatch(RouteRenderTypes.OCCLUDED_LINES);
+                }
+            }
+
+            VertexConsumer consumer = minecraft.renderBuffers().bufferSource().getBuffer(RenderType.lines());
+            float pulse = 0.88f + 0.12f * (float) Math.sin(
+                    (minecraft.level.getGameTime() + event.getPartialTick()) * Math.PI / 50.0);
             for (Map.Entry<Integer, ClientRouteStore.RouteSet> entry : ClientRouteStore.routes().entrySet()) {
                 var entity = minecraft.level.getEntity(entry.getKey());
                 if (entity == null) continue;
                 for (RouteProposal route : entry.getValue().proposals()) {
-                    int[] color = COLORS[Math.floorMod(route.id(), COLORS.length)];
+                    int[] accent = COLORS[Math.floorMod(route.id(), COLORS.length)];
                     boolean highlighted = selected != null && selected.entityId() == entry.getKey()
                             && selected.route().id() == route.id();
-                    float alpha = highlighted ? 1.0f : 0.48f;
-                    Vec3 previous = Vec3.atLowerCornerOf(route.origin()).add(0.5, 0.2, 0.5);
-                    for (var step : route.steps()) {
-                        Vec3 current = Vec3.atLowerCornerOf(step.railPos()).add(0.5, 0.2, 0.5);
-                        line(consumer, matrix, normal, previous, current, color, alpha);
-                        if (highlighted) {
-                            line(consumer, matrix, normal, previous.add(0.018, 0.012, 0),
-                                    current.add(0.018, 0.012, 0), color, alpha);
-                            line(consumer, matrix, normal, previous.add(-0.018, -0.012, 0),
-                                    current.add(-0.018, -0.012, 0), color, alpha);
-                        }
-                        previous = current;
-                    }
+                    RouteOverlayGeometry.Track geometry = RouteOverlayGeometry.build(route);
+                    renderTrack(consumer, matrix, normal, geometry, accent, highlighted, pulse);
                 }
                 RouteProposal active = entry.getValue().activeRoute();
                 if (active != null && entity instanceof com.bettercontent.railscout.entity.RailScoutEntity scout) {
-                    int[] color = COLORS[Math.floorMod(active.id(), COLORS.length)];
-                    Vec3 previous = entity.position().add(0, 0.22, 0);
                     int first = Math.min(scout.activeStep(), active.steps().size());
-                    for (int i = first; i < active.steps().size(); i++) {
-                        Vec3 current = Vec3.atLowerCornerOf(active.steps().get(i).railPos()).add(0.5, 0.22, 0.5);
-                        line(consumer, matrix, normal, previous, current, color, 0.92f);
-                        line(consumer, matrix, normal, previous.add(0.018, 0.012, 0),
-                                current.add(0.018, 0.012, 0), color, 0.92f);
-                        line(consumer, matrix, normal, previous.add(-0.018, -0.012, 0),
-                                current.add(-0.018, -0.012, 0), color, 0.92f);
-                        previous = current;
-                    }
+                    RouteOverlayGeometry.Track geometry = RouteOverlayGeometry.build(
+                            active, first, entity.position());
+                    renderActiveTrack(consumer, matrix, normal, geometry,
+                            COLORS[Math.floorMod(active.id(), COLORS.length)]);
                 }
             }
             pose.popPose();
             minecraft.renderBuffers().bufferSource().endBatch(RenderType.lines());
+        }
+
+        private static void renderTrack(VertexConsumer consumer, Matrix4f matrix, Matrix3f normal,
+                                        RouteOverlayGeometry.Track track, int[] accent,
+                                        boolean highlighted, float pulse) {
+            if (highlighted) {
+                for (RouteOverlayGeometry.Segment segment : track.rails()) {
+                    outlinedLine(consumer, matrix, normal, segment, BRASS, pulse);
+                }
+                for (RouteOverlayGeometry.Segment segment : track.sleepers()) {
+                    outlinedLine(consumer, matrix, normal, segment, PALE_WOOD, pulse * 0.88f);
+                }
+                for (RouteOverlayGeometry.Segment segment : track.ties()) {
+                    outlinedLine(consumer, matrix, normal, segment, accent, pulse);
+                }
+                for (RouteOverlayGeometry.Segment segment : track.pennant()) {
+                    outlinedLine(consumer, matrix, normal, segment, accent, pulse);
+                }
+                return;
+            }
+            for (RouteOverlayGeometry.Segment segment : track.rails()) {
+                line(consumer, matrix, normal, segment.from(), segment.to(), RUST, 0.42f);
+            }
+            for (RouteOverlayGeometry.Segment segment : track.sleepers()) {
+                line(consumer, matrix, normal, segment.from(), segment.to(), WOOD, 0.34f);
+            }
+            for (RouteOverlayGeometry.Segment segment : track.ties()) {
+                line(consumer, matrix, normal, segment.from(), segment.to(), accent, 0.72f);
+            }
+            for (RouteOverlayGeometry.Segment segment : track.pennant()) {
+                line(consumer, matrix, normal, segment.from(), segment.to(), accent, 0.78f);
+            }
+        }
+
+        private static void renderActiveTrack(VertexConsumer consumer, Matrix4f matrix, Matrix3f normal,
+                                              RouteOverlayGeometry.Track track, int[] accent) {
+            for (RouteOverlayGeometry.Segment segment : track.rails()) {
+                outlinedLine(consumer, matrix, normal, segment, BRASS, 0.94f);
+            }
+            for (RouteOverlayGeometry.Segment segment : track.sleepers()) {
+                outlinedLine(consumer, matrix, normal, segment, PALE_WOOD, 0.82f);
+            }
+            for (RouteOverlayGeometry.Segment segment : track.ties()) {
+                outlinedLine(consumer, matrix, normal, segment, accent, 0.92f);
+            }
+            for (RouteOverlayGeometry.Segment segment : track.pennant()) {
+                outlinedLine(consumer, matrix, normal, segment, accent, 0.94f);
+            }
+        }
+
+        private static void outlinedLine(VertexConsumer consumer, Matrix4f matrix, Matrix3f normal,
+                                         RouteOverlayGeometry.Segment segment, int[] color, float alpha) {
+            Vec3 offsetX = new Vec3(0.012, -0.008, 0);
+            Vec3 offsetZ = new Vec3(0, -0.008, 0.012);
+            line(consumer, matrix, normal, segment.from().add(offsetX), segment.to().add(offsetX),
+                    CHARCOAL, alpha * 0.82f);
+            line(consumer, matrix, normal, segment.from().subtract(offsetX), segment.to().subtract(offsetX),
+                    CHARCOAL, alpha * 0.82f);
+            line(consumer, matrix, normal, segment.from().add(offsetZ), segment.to().add(offsetZ),
+                    CHARCOAL, alpha * 0.82f);
+            line(consumer, matrix, normal, segment.from().subtract(offsetZ), segment.to().subtract(offsetZ),
+                    CHARCOAL, alpha * 0.82f);
+            line(consumer, matrix, normal, segment.from(), segment.to(), color, alpha);
         }
 
         private static void line(VertexConsumer consumer, Matrix4f matrix, Matrix3f normal,
@@ -172,6 +252,11 @@ public final class RailScoutClient {
             float nx = (float) (to.x - from.x);
             float ny = (float) (to.y - from.y);
             float nz = (float) (to.z - from.z);
+            float length = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+            if (length < 1.0e-5f) return;
+            nx /= length;
+            ny /= length;
+            nz /= length;
             consumer.vertex(matrix, (float) from.x, (float) from.y, (float) from.z)
                     .color(color[0], color[1], color[2], (int) (alpha * 255)).normal(normal, nx, ny, nz).endVertex();
             consumer.vertex(matrix, (float) to.x, (float) to.y, (float) to.z)

@@ -13,11 +13,12 @@ import net.minecraft.world.entity.player.Inventory;
 
 public final class RailScoutScreen extends AbstractContainerScreen<RailScoutMenu> {
     private Button brakeButton;
+    private Button neutralButton;
     private final java.util.List<ControlButton> controlButtons = new java.util.ArrayList<>();
 
     public RailScoutScreen(RailScoutMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
-        imageWidth = 176;
+        imageWidth = 244;
         imageHeight = 184;
         inventoryLabelY = 92;
     }
@@ -37,7 +38,10 @@ public final class RailScoutScreen extends AbstractContainerScreen<RailScoutMenu
                 "screen.rail_scout.normal", ScoutControl.NORMAL_SPEED);
         addControl(leftPos + 103, y, 22, Component.translatable("screen.rail_scout.double.short"),
                 "screen.rail_scout.double", ScoutControl.DOUBLE_SPEED);
-        brakeButton = button(leftPos + 128, y, 41, brakeLabel(), ScoutControl.TOGGLE_HAND_BRAKE);
+        neutralButton = button(leftPos + 176, topPos + 18, 61, neutralLabel(), ScoutControl.TOGGLE_NEUTRAL);
+        neutralButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_scout.neutral.tooltip")));
+        addRenderableWidget(neutralButton);
+        brakeButton = button(leftPos + 176, topPos + 42, 61, brakeLabel(), ScoutControl.TOGGLE_HAND_BRAKE);
         brakeButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_scout.brake.tooltip")));
         addRenderableWidget(brakeButton);
     }
@@ -46,12 +50,20 @@ public final class RailScoutScreen extends AbstractContainerScreen<RailScoutMenu
     protected void containerTick() {
         super.containerTick();
         brakeButton.setMessage(brakeLabel());
+        neutralButton.setMessage(neutralLabel());
     }
 
     private Component brakeLabel() {
-        return Component.translatable(menu.scout().forcedBrake()
+        RailScoutEntity scout = menu.scout();
+        return Component.translatable(scout.forcedBrake()
                 ? "screen.rail_scout.brake.locked"
-                : "screen.rail_scout.brake.auto");
+                : scout.brakeApplied() ? "screen.rail_scout.brake.auto_on" : "screen.rail_scout.brake.auto_off");
+    }
+
+    private Component neutralLabel() {
+        return Component.translatable(menu.scout().neutral()
+                ? "screen.rail_scout.neutral.on"
+                : "screen.rail_scout.neutral.off");
     }
 
     private Button button(int x, int y, int width, Component label, ScoutControl action) {
@@ -71,6 +83,7 @@ public final class RailScoutScreen extends AbstractContainerScreen<RailScoutMenu
         graphics.fill(leftPos, topPos, leftPos + imageWidth, topPos + imageHeight, 0xee161a1d);
         graphics.fill(leftPos + 5, topPos + 15, leftPos + 171, topPos + 73, 0xff252b30);
         graphics.fill(leftPos + 5, topPos + 99, leftPos + 171, topPos + 179, 0xff252b30);
+        graphics.fill(leftPos + 174, topPos + 15, leftPos + 239, topPos + 73, 0xff252b30);
         for (int slot = 0; slot < menu.slots.size(); slot++) {
             var value = menu.slots.get(slot);
             graphics.fill(leftPos + value.x - 1, topPos + value.y - 1,
@@ -84,7 +97,7 @@ public final class RailScoutScreen extends AbstractContainerScreen<RailScoutMenu
         graphics.drawString(font, title, titleLabelX, titleLabelY, 0xe8f5f8, false);
         Component supplies = Component.translatable("screen.rail_scout.supplies",
                 scout.railCount(), scout.supportCount(), scout.fuelTicks() / 20);
-        graphics.drawString(font, supplies, imageWidth - 7 - font.width(supplies), titleLabelY, 0xbddce5, false);
+        graphics.drawString(font, supplies, 169 - font.width(supplies), titleLabelY, 0xbddce5, false);
         graphics.drawString(font, playerInventoryTitle, inventoryLabelX, inventoryLabelY, 0xcbd2d6, false);
     }
 

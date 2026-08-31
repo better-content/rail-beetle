@@ -11,6 +11,7 @@ import com.simibubi.create.content.contraptions.minecart.capability.CapabilityMi
 import com.simibubi.create.content.contraptions.minecart.CouplingHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.gametest.framework.GameTest;
@@ -139,10 +140,17 @@ public final class RailScoutGameTests {
         var pig = EntityType.PIG.create(helper.getLevel());
         helper.assertTrue(pig != null, "test pig must create");
         pig.setPos(scout.getX() + 0.1, scout.getY(), scout.getZ());
+        double pigStartX = pig.getX();
+        double pigStartZ = pig.getZ();
+        float pigHealth = pig.getHealth();
         helper.getLevel().addFreshEntity(scout);
         helper.getLevel().addFreshEntity(pig);
         net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
         player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
+        net.minecraft.world.entity.player.Player blocker = helper.makeMockPlayer();
+        blocker.setPos(scout.getX() + 0.6, scout.getY(), scout.getZ());
+        float blockerHealth = blocker.getHealth();
+        List<Double> samples = new ArrayList<>();
 
         helper.assertTrue(!scout.canBeRidden(), "Scout must not accept automatic mob passengers");
         helper.assertTrue(!scout.isPushable(), "Scout must reject ordinary entity shove impulses");
@@ -151,12 +159,60 @@ public final class RailScoutGameTests {
                         .equals(ResourceLocation.fromNamespaceAndPath("create", "brass_casing")),
                 "Create installations must render a brass casing in the Scout");
         scout.control(player, ScoutControl.HALF_SPEED);
+        blocker.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
+        scout.push(blocker);
+        helper.assertTrue(blocker.getDeltaMovement().horizontalDistanceSqr() > 0.1,
+                "powered Scout must apply a strong clearing impulse to players");
+        helper.onEachTick(() -> {
+            if (helper.getTick() >= 2 && helper.getTick() <= 12) samples.add(scout.getX());
+        });
 
         helper.runAfterDelay(20, () -> {
             helper.assertTrue(!scout.hasPassenger(pig) && pig.getVehicle() != scout,
                     "nearby mobs must never be collected as Scout passengers");
             helper.assertTrue(scout.noseHeading() == Direction.EAST,
                     "mob contact must not reverse the Scout's commanded heading");
+            helper.assertTrue(Math.hypot(pig.getX() - pigStartX, pig.getZ() - pigStartZ) > 0.3,
+                    "powered Scout must shove mobs out of its path");
+            helper.assertTrue(pig.getHealth() == pigHealth && blocker.getHealth() == blockerHealth,
+                    "Scout shoves must never damage mobs or players");
+            for (int index = 1; index < samples.size(); index++) {
+                helper.assertTrue(samples.get(index) - samples.get(index - 1) > 0.07,
+                        "living-entity collisions must not slow the powered Scout");
+            }
+            helper.succeed();
+        });
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void createCartCanTowNeutralScout(GameTestHelper helper) {
+        BlockPos start = helper.absolutePos(new BlockPos(4, 2, 6));
+        for (int x = 0; x <= 12; x++) placeEastWestRail(helper, start.east(x));
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(start.getX() + 3.5, start.getY() + 0.0625, start.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        Minecart towCart = new Minecart(helper.getLevel(),
+                start.getX() + 1.5, start.getY() + 0.0625, start.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(scout);
+        helper.getLevel().addFreshEntity(towCart);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
+        double initialX = scout.getX();
+
+        helper.runAfterDelay(2, () -> {
+            helper.assertTrue(CouplingHandler.tryToCoupleCarts(null, helper.getLevel(), scout.getId(), towCart.getId()),
+                    "Create must couple a tow cart to the Scout");
+            scout.control(player, ScoutControl.TOGGLE_NEUTRAL);
+        });
+        helper.onEachTick(() -> {
+            if (helper.getTick() >= 3 && helper.getTick() <= 35) towCart.setDeltaMovement(0.25, 0, 0);
+        });
+        helper.runAfterDelay(40, () -> {
+            helper.assertTrue(scout.mode() == ScoutMode.NEUTRAL,
+                    "towing must not silently leave Neutral");
+            helper.assertTrue(scout.getX() > initialX + 0.5,
+                    "a Create-coupled cart must be able to tow the neutral Scout; pos=" + scout.position());
             helper.succeed();
         });
     }
@@ -749,6 +805,82 @@ public final class RailScoutGameTests {
                     helper.assertTrue(helper.getLevel().getBlockState(obstruction).is(Blocks.STONE),
                             "stale-route rejection must not damage the protected replacement");
                 })
+                .thenSucceed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void neutralRestoresPushPhysicsAndInterlocksWithHandbrake(GameTestHelper helper) {
+        BlockPos rail = helper.absolutePos(new BlockPos(4, 2, 4));
+        for (int x = -2; x <= 2; x++) placeEastWestRail(helper, rail.offset(x, 0, 0));
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(rail.getX() + 0.5, rail.getY() + 0.0625, rail.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        helper.getLevel().addFreshEntity(scout);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
+
+        scout.control(player, ScoutControl.TOGGLE_NEUTRAL);
+        helper.assertTrue(scout.mode() == ScoutMode.NEUTRAL, "Neutral control must enter Neutral");
+        helper.assertTrue(scout.isPushable() && !scout.isPoweredCart(),
+                "Neutral Scout must use ordinary pushable, non-powered cart physics");
+        helper.assertTrue(!scout.brakeApplied() && !scout.forcedBrake(),
+                "Neutral must release both automatic and forced handbrakes");
+        scout.push(0.2, 0, 0);
+        helper.assertTrue(scout.getDeltaMovement().x > 0.15, "Neutral must accept an external push impulse");
+
+        CompoundTag saved = new CompoundTag();
+        scout.saveWithoutId(saved);
+        RailScoutEntity loaded = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(loaded != null, "loaded Scout entity type must create");
+        loaded.load(saved);
+        helper.assertTrue(loaded.mode() == ScoutMode.NEUTRAL,
+                "Neutral switch state must survive an entity save/load cycle");
+
+        scout.control(player, ScoutControl.TOGGLE_HAND_BRAKE);
+        helper.assertTrue(scout.mode() != ScoutMode.NEUTRAL && scout.forcedBrake() && scout.brakeApplied(),
+                "locking the handbrake must exit Neutral and brake immediately");
+        helper.assertTrue(!scout.isPushable() && scout.isPoweredCart(),
+                "a braked Scout must return to authoritative powered-cart physics");
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 180)
+    public static void forwardTerminalCannotOvershootAndAutomaticallyPlans(GameTestHelper helper) {
+        BlockPos start = helper.absolutePos(new BlockPos(4, 2, 8));
+        for (int x = 0; x <= 3; x++) placeEastWestRail(helper, start.east(x));
+        BlockPos endpoint = start.east(3);
+        for (int x = 4; x <= 12; x++) {
+            for (int z = -4; z <= 4; z++) {
+                BlockPos candidate = start.offset(x, 0, z);
+                helper.getLevel().setBlockAndUpdate(candidate.below(), Blocks.STONE.defaultBlockState());
+                helper.getLevel().setBlockAndUpdate(candidate, Blocks.AIR.defaultBlockState());
+                helper.getLevel().setBlockAndUpdate(candidate.above(), Blocks.AIR.defaultBlockState());
+            }
+        }
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(start.getX() + 0.5, start.getY() + 0.0625, start.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        helper.getLevel().addFreshEntity(scout);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
+        scout.control(player, ScoutControl.DOUBLE_SPEED);
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(scout.mode() == ScoutMode.PLANNING || scout.mode() == ScoutMode.READY,
+                        "forward terminal arrival must automatically enter route planning"))
+                .thenExecute(() -> {
+                    double endpointX = endpoint.getX() + 0.5;
+                    helper.assertTrue(Math.abs(scout.getX() - endpointX) < 0.01,
+                            "terminal guard must clamp the Scout to the final rail center; pos=" + scout.position());
+                    helper.assertTrue(scout.brakeApplied(), "planning at the terminal must apply the handbrake immediately");
+                    for (int count = 0; count < 8; count++) scout.push(0.8, 0, 0);
+                })
+                .thenIdle(10)
+                .thenExecute(() -> helper.assertTrue(Math.abs(scout.getX() - (endpoint.getX() + 0.5)) < 0.01,
+                        "external pushes must never move a non-Neutral Scout off its terminal rail"))
                 .thenSucceed();
     }
 

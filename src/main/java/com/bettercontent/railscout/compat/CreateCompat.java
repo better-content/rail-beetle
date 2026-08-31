@@ -23,6 +23,11 @@ public final class CreateCompat {
         }
     }
 
+    public static boolean isInSameConsist(AbstractMinecart first, net.minecraft.world.entity.Entity candidate) {
+        return ModList.get().isLoaded("create") && candidate instanceof AbstractMinecart cart
+                && Loaded.isInSameConsist(first, cart);
+    }
+
     private static final class Loaded {
         private Loaded() {}
 
@@ -58,6 +63,28 @@ public final class CreateCompat {
                             }
                         });
             }
+        }
+
+        private static boolean isInSameConsist(AbstractMinecart first, AbstractMinecart candidate) {
+            if (!(first.level() instanceof net.minecraft.server.level.ServerLevel level)) return false;
+            java.util.ArrayDeque<AbstractMinecart> frontier = new java.util.ArrayDeque<>();
+            java.util.Set<java.util.UUID> visited = new java.util.HashSet<>();
+            frontier.add(first);
+            visited.add(first.getUUID());
+            while (!frontier.isEmpty()) {
+                AbstractMinecart current = frontier.removeFirst();
+                if (current == candidate) return true;
+                current.getCapability(com.simibubi.create.content.contraptions.minecart.capability.CapabilityMinecartController
+                                .MINECART_CONTROLLER_CAPABILITY)
+                        .ifPresent(controller -> {
+                            for (boolean side : new boolean[]{false, true}) {
+                                java.util.UUID coupledId = controller.getCoupledCart(side);
+                                if (coupledId == null || !visited.add(coupledId)) continue;
+                                if (level.getEntity(coupledId) instanceof AbstractMinecart coupled) frontier.addLast(coupled);
+                            }
+                        });
+            }
+            return false;
         }
 
         private static void applyRailAlignedAcceleration(

@@ -8,6 +8,7 @@ public enum ScoutMode {
     AUTO_BUILD,
     MANUAL_FORWARD,
     MANUAL_REVERSE,
+    NEUTRAL,
     PAUSED,
     COMPLETE;
 

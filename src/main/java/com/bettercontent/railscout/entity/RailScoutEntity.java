@@ -27,10 +27,12 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.Minecart;
+import net.minecraft.world.entity.vehicle.AbstractMinecart;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -61,7 +63,7 @@ import java.util.UUID;
 
 public final class RailScoutEntity extends Minecart implements MenuProvider {
     public static final int INVENTORY_SIZE = 27;
-    private static final int SAVE_VERSION = 2;
+    private static final int SAVE_VERSION = 3;
     private static final int PLAN_NODE_BUDGET = 2_048;
     private static final int PLAN_REFRESH_TICKS = 20;
     private static final int GENERATION_GRACE_TICKS = 40;
@@ -71,11 +73,14 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     private static final double ACCELERATION = 0.4;
     private static final double SERVICE_DECELERATION = 0.02;
     private static final double MAX_RAIL_SPEED = 8.0 / 20.0;
+    private static final double LIVING_SHOVE = 0.35;
+    private static final double CART_SHOVE = 0.45;
     private static final double AIM_TAN = 0.03492076949;
     private static final ResourceLocation BRASS_CASING = ResourceLocation.fromNamespaceAndPath("create", "brass_casing");
 
     private static final EntityDataAccessor<Integer> DATA_MODE = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> DATA_FORCED_BRAKE = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> DATA_BRAKE_APPLIED = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Integer> DATA_FUEL = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> DATA_RAILS = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> DATA_SUPPORTS = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.INT);
@@ -111,6 +116,8 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     @Nullable private BlockPos lastRail;
     @Nullable private BlockPos commandedFromRail;
     @Nullable private BlockPos commandedNextRail;
+    @Nullable private BlockPos preTickRail;
+    @Nullable private Vec3 preTickPosition;
     private boolean commandedTravelIsForward;
     private boolean inventoryDropped;
 
@@ -123,6 +130,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         super.defineSynchedData();
         entityData.define(DATA_MODE, ScoutMode.STOPPED.ordinal());
         entityData.define(DATA_FORCED_BRAKE, false);
+        entityData.define(DATA_BRAKE_APPLIED, true);
         entityData.define(DATA_FUEL, 0);
         entityData.define(DATA_RAILS, 0);
         entityData.define(DATA_SUPPORTS, 0);
@@ -151,6 +159,8 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     }
 
     public boolean forcedBrake() { return level().isClientSide ? entityData.get(DATA_FORCED_BRAKE) : forcedBrake; }
+    public boolean brakeApplied() { return level().isClientSide ? entityData.get(DATA_BRAKE_APPLIED) : automaticBrakeApplied; }
+    public boolean neutral() { return mode() == ScoutMode.NEUTRAL; }
     public int fuelTicks() { return level().isClientSide ? entityData.get(DATA_FUEL) : fuelTicks; }
     public int activeStep() { return level().isClientSide ? entityData.get(DATA_PROGRESS) : activeStep; }
     public int activeRouteLength() { return level().isClientSide ? entityData.get(DATA_ROUTE_LENGTH) : activeRoute == null ? 0 : activeRoute.steps().size(); }
@@ -177,11 +187,14 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         commandedFromRail = null;
         commandedNextRail = null;
         BlockPos rail = railPosition();
+        rail = recoverNearbyRail(rail);
+        preTickRail = rail == null ? null : rail.immutable();
+        preTickPosition = position();
         initializeHeading(rail);
         normalizeState(rail);
-        boolean brake = forcedBrake || !mode.moves();
+        boolean brake = shouldBrake();
         applyAutomaticBrake(brake);
-        if (brake) return;
+        if (brake || mode == ScoutMode.NEUTRAL) return;
         if (!ensureFuel()) {
             pause();
             return;
@@ -195,15 +208,24 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     }
 
     private void serverPostTick() {
-        BlockPos rail = railPosition();
+        BlockPos rail = enforceRailBoundary(railPosition());
         updateHeadingForRailTransition(rail);
-        if (forcedBrake || !mode.moves()) setDeltaMovement(Vec3.ZERO);
+        if (shouldBrake()) {
+            if (preTickPosition != null) setPos(preTickPosition.x, preTickPosition.y, preTickPosition.z);
+            setDeltaMovement(Vec3.ZERO);
+        } else if (mode.moves()) {
+            shoveNearbyEntities();
+        }
         if (mode == ScoutMode.DEPARTING && departureTicks > 0 && --departureTicks == 0) mode = ScoutMode.AUTO_BUILD;
         reconcileActiveProgress(rail);
         syncStatus();
     }
 
     private void normalizeState(@Nullable BlockPos rail) {
+        if (mode == ScoutMode.NEUTRAL) {
+            if (!previousProposals.isEmpty()) previousProposals = List.of();
+            return;
+        }
         if (rail == null) {
             clearPlanningAndProposals();
             clearActiveRoute();
@@ -265,6 +287,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         previousProposals = List.of();
         planningOrigin = origin.immutable();
         mode = ScoutMode.PLANNING;
+        applyAutomaticBrake(true);
         nextRefreshTick = level().getGameTime();
         syncRoutes();
     }
@@ -412,6 +435,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         setDeltaMovement(Vec3.ZERO);
         clearActiveRoute();
         mode = ScoutMode.COMPLETE;
+        applyAutomaticBrake(true);
         syncRoutes();
     }
 
@@ -421,6 +445,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         mode = ScoutMode.STOPPED;
         BlockPos rail = railPosition();
         if (rail != null && isForwardTerminus(rail)) beginPlanning(rail);
+        else applyAutomaticBrake(true);
     }
 
     private boolean ensureFuel() {
@@ -505,6 +530,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
             if (mode.moves()) {
                 mode = ScoutMode.PAUSED;
                 setDeltaMovement(Vec3.ZERO);
+                applyAutomaticBrake(true);
             } else {
                 clearActiveRoute();
                 clearPlanningAndProposals();
@@ -541,6 +567,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         mode = ScoutMode.DEPARTING;
         departureTicks = DEPARTURE_TICKS;
         setDeltaMovement(Vec3.ZERO);
+        applyAutomaticBrake(false);
         level().playSound(null, blockPosition(), RailScoutRegistries.WHISTLE.get(), SoundSource.BLOCKS, 2.0f, 1.0f);
         syncRoutes();
         return true;
@@ -560,17 +587,24 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         switch (action) {
             case TOGGLE_HAND_BRAKE -> {
                 forcedBrake = !forcedBrake;
-                if (forcedBrake && mode.moves()) mode = activeRoute == null ? ScoutMode.STOPPED : ScoutMode.PAUSED;
+                if (forcedBrake) {
+                    if (mode == ScoutMode.NEUTRAL) mode = ScoutMode.STOPPED;
+                    if (mode.moves()) mode = activeRoute == null ? ScoutMode.STOPPED : ScoutMode.PAUSED;
+                    applyAutomaticBrake(true);
+                }
             }
+            case TOGGLE_NEUTRAL -> toggleNeutral();
             case STOP -> {
                 mode = activeRoute == null ? ScoutMode.STOPPED : ScoutMode.PAUSED;
                 setDeltaMovement(Vec3.ZERO);
+                applyAutomaticBrake(true);
             }
             case REVERSE -> {
                 if (forcedBrake) return;
                 clearActiveRoute();
                 clearPlanningAndProposals();
                 mode = ScoutMode.MANUAL_REVERSE;
+                applyAutomaticBrake(false);
             }
             case HALF_SPEED -> selectForwardSpeed(ScoutSpeed.HALF);
             case NORMAL_SPEED -> selectForwardSpeed(ScoutSpeed.NORMAL);
@@ -583,11 +617,27 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     private void selectForwardSpeed(ScoutSpeed selected) {
         speedTier = selected;
         if (forcedBrake) return;
+        if (mode == ScoutMode.NEUTRAL) mode = ScoutMode.STOPPED;
         if (activeRoute != null) mode = ScoutMode.AUTO_BUILD;
         else {
             clearPlanningAndProposals();
             mode = ScoutMode.MANUAL_FORWARD;
         }
+        applyAutomaticBrake(false);
+    }
+
+    private void toggleNeutral() {
+        if (mode == ScoutMode.NEUTRAL) {
+            mode = ScoutMode.STOPPED;
+            applyAutomaticBrake(true);
+            return;
+        }
+        forcedBrake = false;
+        clearActiveRoute();
+        clearPlanningAndProposals();
+        mode = ScoutMode.NEUTRAL;
+        setDeltaMovement(Vec3.ZERO);
+        applyAutomaticBrake(false);
     }
 
     private boolean canContextPlayer(Player player) {
@@ -622,6 +672,84 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         } else setCurrentCartSpeedCapOnRail((float) MAX_RAIL_SPEED);
         CreateCompat.setExternallyStalled(this, brake);
         automaticBrakeApplied = brake;
+    }
+
+    private boolean shouldBrake() {
+        return forcedBrake || (!mode.moves() && mode != ScoutMode.NEUTRAL);
+    }
+
+    @Nullable
+    private BlockPos recoverNearbyRail(@Nullable BlockPos rail) {
+        if (rail != null || mode == ScoutMode.NEUTRAL || lastRail == null) return rail;
+        if (!(level().getBlockState(lastRail).getBlock() instanceof BaseRailBlock)) return null;
+        Vec3 center = railCenter(lastRail);
+        if (horizontalDistance(position(), center) > 1.25 || Math.abs(getY() - center.y) > 1.5) return null;
+        setPos(center.x, getY(), center.z);
+        setDeltaMovement(Vec3.ZERO);
+        return lastRail;
+    }
+
+    @Nullable
+    private BlockPos enforceRailBoundary(@Nullable BlockPos rail) {
+        if (mode == ScoutMode.NEUTRAL || preTickRail == null) return rail;
+        if (rail == null) {
+            Vec3 anchor = shouldBrake() && preTickPosition != null ? preTickPosition : railCenter(preTickRail);
+            setPos(anchor.x, anchor.y, anchor.z);
+            preTickPosition = position();
+            setDeltaMovement(Vec3.ZERO);
+            handleTerminalArrival(preTickRail);
+            return preTickRail;
+        }
+        if (!mode.moves() || !rail.equals(preTickRail)) return rail;
+        Direction desired = mode == ScoutMode.MANUAL_REVERSE ? noseHeading.getOpposite() : noseHeading;
+        Direction exit = resolveExit(rail, desired);
+        if (exit == null || connectedRail(rail, exit) != null) return rail;
+        Vec3 center = railCenter(rail);
+        if (forwardDistance(center, position(), exit) <= 0) return rail;
+        setPos(center.x, getY(), center.z);
+        preTickPosition = position();
+        setDeltaMovement(Vec3.ZERO);
+        handleTerminalArrival(rail);
+        return rail;
+    }
+
+    private void handleTerminalArrival(BlockPos rail) {
+        if (activeRoute != null && rail.equals(activeRoute.endpoint())) {
+            finishRoute();
+        } else if (mode == ScoutMode.MANUAL_FORWARD && isForwardTerminus(rail)) {
+            beginPlanning(rail);
+        } else if (mode == ScoutMode.MANUAL_REVERSE || mode.moves()) {
+            mode = ScoutMode.STOPPED;
+            applyAutomaticBrake(true);
+        }
+    }
+
+    private void shoveNearbyEntities() {
+        for (Entity entity : level().getEntities(this, getBoundingBox().inflate(0.25, 0.1, 0.25), this::canShove)) {
+            shoveEntity(entity);
+        }
+    }
+
+    private boolean canShove(Entity entity) {
+        return entity.isAlive() && entity.isPushable() && !entity.noPhysics && !entity.isSpectator()
+                && !entity.isPassenger() && !hasPassenger(entity) && !CreateCompat.isInSameConsist(this, entity);
+    }
+
+    private void shoveEntity(Entity entity) {
+        if (!canShove(entity)) return;
+        Direction travel = mode == ScoutMode.MANUAL_REVERSE ? noseHeading.getOpposite() : noseHeading;
+        double tangentX = travel.getStepX();
+        double tangentZ = travel.getStepZ();
+        if (entity instanceof AbstractMinecart) {
+            entity.push(tangentX * CART_SHOVE, 0, tangentZ * CART_SHOVE);
+            return;
+        }
+        double lateralX = -tangentZ;
+        double lateralZ = tangentX;
+        double lateral = (entity.getX() - getX()) * lateralX + (entity.getZ() - getZ()) * lateralZ;
+        double side = Math.abs(lateral) > 0.05 ? Math.signum(lateral) : ((entity.getUUID().hashCode() & 1) == 0 ? 1 : -1);
+        entity.push(lateralX * side * LIVING_SHOVE + tangentX * 0.1, 0.05,
+                lateralZ * side * LIVING_SHOVE + tangentZ * 0.1);
     }
 
     private boolean isForwardTerminus(BlockPos rail) {
@@ -703,6 +831,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     private void pause() {
         mode = activeRoute == null ? ScoutMode.STOPPED : ScoutMode.PAUSED;
         setDeltaMovement(Vec3.ZERO);
+        applyAutomaticBrake(true);
     }
 
     private void clearActiveRoute() {
@@ -745,6 +874,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     private void syncStatus() {
         entityData.set(DATA_MODE, mode.ordinal());
         entityData.set(DATA_FORCED_BRAKE, forcedBrake);
+        entityData.set(DATA_BRAKE_APPLIED, automaticBrakeApplied);
         entityData.set(DATA_FUEL, fuelTicks);
         entityData.set(DATA_RAILS, ScoutSupplies.countRails(inventory));
         entityData.set(DATA_SUPPORTS, ScoutSupplies.countSupports(inventory));
@@ -782,9 +912,19 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
 
     @Override public boolean canBeRidden() { return false; }
 
-    @Override public boolean isPoweredCart() { return true; }
+    @Override public boolean isPoweredCart() { return mode() != ScoutMode.NEUTRAL; }
 
-    @Override public boolean isPushable() { return false; }
+    @Override public boolean isPushable() { return mode() == ScoutMode.NEUTRAL; }
+
+    @Override
+    public void push(Entity entity) {
+        if (mode() == ScoutMode.NEUTRAL) super.push(entity); else shoveEntity(entity);
+    }
+
+    @Override
+    public void push(double x, double y, double z) {
+        if (mode() == ScoutMode.NEUTRAL) super.push(x, y, z);
+    }
 
     @Override
     public BlockState getDefaultDisplayBlockState() {
@@ -826,6 +966,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         tag.putInt("RailScoutDataVersion", SAVE_VERSION);
         tag.put("Inventory", inventory.serializeNBT());
         tag.putBoolean("ForcedBrake", forcedBrake);
+        tag.putBoolean("Neutral", mode == ScoutMode.NEUTRAL);
         tag.putInt("FuelTicks", fuelTicks);
         tag.putLong("ProposalGeneration", proposalGeneration);
         tag.putInt("ActiveStep", activeStep);
@@ -849,14 +990,18 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
             noseHeading = savedHeading;
             headingInitialized = true;
         }
-        boolean currentFormat = tag.getInt("RailScoutDataVersion") >= SAVE_VERSION;
-        activeRoute = currentFormat && tag.contains("ActiveRoute", Tag.TAG_COMPOUND) ? readRoute(tag.getCompound("ActiveRoute")) : null;
+        boolean hasRouteFormat = tag.getInt("RailScoutDataVersion") >= 2;
+        activeRoute = hasRouteFormat && tag.contains("ActiveRoute", Tag.TAG_COMPOUND) ? readRoute(tag.getCompound("ActiveRoute")) : null;
         activeStep = activeRoute == null ? 0 : Mth.clamp(tag.getInt("ActiveStep"), 0, activeRoute.steps().size());
         placedRouteRails.clear();
         if (activeRoute != null) {
             for (long packed : tag.getLongArray("PlacedRouteRails")) placedRouteRails.add(BlockPos.of(packed));
         }
-        mode = activeRoute == null ? ScoutMode.STOPPED : ScoutMode.PAUSED;
+        mode = tag.getBoolean("Neutral") ? ScoutMode.NEUTRAL : activeRoute == null ? ScoutMode.STOPPED : ScoutMode.PAUSED;
+        if (mode == ScoutMode.NEUTRAL) {
+            forcedBrake = false;
+            clearActiveRoute();
+        }
         proposals = List.of();
         previousProposals = List.of();
         clearPlanning();

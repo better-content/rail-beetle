@@ -26,8 +26,9 @@ otherwise.
 - The Scout automatically applies its hand brake between automatic phases and
   on slopes. Its `0.4` blocks/tick² traction is shared across a Create-coupled
   consist so trailing carts keep climbing without pulling the Scout backward.
-- Mobs cannot board or shove the Scout. It uses powered-cart collision priority
-  against ordinary minecarts so incidental impacts do not reverse its command.
+- Outside Neutral, collisions cannot slow or displace the Scout; it shoves
+  movable entities clear and clamps itself to terminal rail centers. Neutral
+  clears routes, releases the brake, and restores ordinary pushing and towing.
 - The default route cap is 64 rails and can be changed in the server config.
 
 The planner only traverses loaded terrain, never excavates solid blocks or routes

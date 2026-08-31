@@ -25,6 +25,7 @@ public final class RailScoutMod {
     private void creativeTab(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == net.minecraft.world.item.CreativeModeTabs.TOOLS_AND_UTILITIES) {
             event.accept(RailScoutRegistries.RAIL_SCOUT_ITEM);
+            event.accept(RailScoutRegistries.ROUTE_BEACON_ITEM);
         }
     }
 }

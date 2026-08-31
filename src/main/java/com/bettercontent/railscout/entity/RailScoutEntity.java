@@ -5,6 +5,8 @@ import com.bettercontent.railscout.RailScoutRegistries;
 import com.bettercontent.railscout.compat.CreateCompat;
 import com.bettercontent.railscout.menu.RailScoutMenu;
 import com.bettercontent.railscout.navigation.RouteProposal;
+import com.bettercontent.railscout.navigation.RouteKind;
+import com.bettercontent.railscout.navigation.RouteSupplyStatus;
 import com.bettercontent.railscout.navigation.RouteStep;
 import com.bettercontent.railscout.navigation.RouteObstructions;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
@@ -29,6 +31,8 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.Minecart;
@@ -44,6 +48,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.RailShape;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
@@ -63,12 +68,12 @@ import java.util.UUID;
 
 public final class RailScoutEntity extends Minecart implements MenuProvider {
     public static final int INVENTORY_SIZE = 27;
-    private static final int SAVE_VERSION = 3;
+    private static final int SAVE_VERSION = 4;
     private static final int PLAN_NODE_BUDGET = 2_048;
     private static final int PLAN_REFRESH_TICKS = 20;
     private static final int GENERATION_GRACE_TICKS = 40;
     private static final int G_COOLDOWN_TICKS = 20;
-    private static final int DEPARTURE_TICKS = 60;
+    static final int DEPARTURE_TICKS = 25;
     private static final double REVERSE_SPEED = 0.5 / 20.0;
     private static final double ACCELERATION = 0.4;
     private static final double SERVICE_DECELERATION = 0.02;
@@ -89,7 +94,12 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     private static final EntityDataAccessor<Integer> DATA_NOSE = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> DATA_SPEED = SynchedEntityData.defineId(RailScoutEntity.class, EntityDataSerializers.INT);
 
-    private final ItemStackHandler inventory = new ItemStackHandler(INVENTORY_SIZE);
+    private final ItemStackHandler inventory = new ItemStackHandler(INVENTORY_SIZE) {
+        @Override
+        protected void onContentsChanged(int slot) {
+            if (!level().isClientSide && !proposals.isEmpty()) syncRoutes();
+        }
+    };
     private LazyOptional<ItemStackHandler> inventoryCapability = LazyOptional.of(() -> inventory);
     private final Set<UUID> trackingPlayers = new HashSet<>();
     private final Map<UUID, Long> lastContextAction = new HashMap<>();
@@ -120,6 +130,8 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     @Nullable private BlockPos preTickRail;
     @Nullable private Vec3 preTickPosition;
     private boolean commandedTravelIsForward;
+    private double commandedHorizontalSpeed;
+    private boolean clearedLivingBlocker;
     private boolean inventoryDropped;
 
     public RailScoutEntity(EntityType<? extends RailScoutEntity> type, Level level) {
@@ -169,6 +181,9 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     public int supportCount() { return level().isClientSide ? entityData.get(DATA_SUPPORTS) : ScoutSupplies.countSupports(inventory); }
     public List<RouteProposal> proposals() { return proposals; }
     @Nullable public RouteProposal activeRoute() { return activeRoute; }
+    public RouteSupplyStatus supplyStatus(RouteProposal route) {
+        return ScoutSupplies.supplyStatus(inventory, fuelTicks, route);
+    }
 
     public void setInitialHeading(Direction heading) {
         if (heading.getAxis().isHorizontal()) {
@@ -187,6 +202,8 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     private void serverPreTick() {
         commandedFromRail = null;
         commandedNextRail = null;
+        commandedHorizontalSpeed = 0;
+        clearedLivingBlocker = false;
         BlockPos rail = railPosition();
         rail = recoverNearbyRail(rail);
         preTickRail = rail == null ? null : rail.immutable();
@@ -205,7 +222,11 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
             case MANUAL_FORWARD, MANUAL_REVERSE -> prepareManualMovement(rail);
             default -> false;
         };
-        if (commanded) fuelTicks--;
+        if (commanded) {
+            fuelTicks--;
+            commandedHorizontalSpeed = horizontalSpeed();
+            clearedLivingBlocker = clearLivingCorridor();
+        }
     }
 
     private void serverPostTick() {
@@ -215,6 +236,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
             if (preTickPosition != null) setPos(preTickPosition.x, preTickPosition.y, preTickPosition.z);
             setDeltaMovement(Vec3.ZERO);
         } else if (mode.moves()) {
+            if (clearedLivingBlocker) restoreCommandedSpeed();
             shoveNearbyEntities();
         }
         if (mode == ScoutMode.DEPARTING && departureTicks > 0 && --departureTicks == 0) mode = ScoutMode.AUTO_BUILD;
@@ -312,7 +334,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         proposalGeneration++;
         List<RouteProposal> fresh = snapshot.proposals().stream()
                 .map(route -> new RouteProposal(route.id(), proposalGeneration, route.origin(),
-                        route.originHeading(), route.endpoint(), route.steps()))
+                        route.originHeading(), route.endpoint(), route.steps(), route.kind(), route.beaconTarget()))
                 .toList();
         previousProposals = proposals;
         previousGenerationExpires = now + GENERATION_GRACE_TICKS;
@@ -746,8 +768,47 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     }
 
     private boolean canShove(Entity entity) {
-        return entity.isAlive() && entity.isPushable() && !entity.noPhysics && !entity.isSpectator()
+        return entity.isAlive() && (entity instanceof LivingEntity || entity.isPushable())
+                && !entity.noPhysics && !entity.isSpectator()
                 && !entity.isPassenger() && !hasPassenger(entity) && !CreateCompat.isInSameConsist(this, entity);
+    }
+
+    private boolean clearLivingCorridor() {
+        Vec3 motion = getDeltaMovement();
+        if (motion.horizontalDistanceSqr() < 1.0e-6) return false;
+        AABB corridor = getBoundingBox().expandTowards(motion.x * 1.5, 0, motion.z * 1.5)
+                .inflate(0.35, 0.1, 0.35);
+        boolean cleared = false;
+        for (Entity entity : level().getEntities(this, corridor,
+                candidate -> candidate instanceof LivingEntity && canShove(candidate))) {
+            moveLivingAside(entity);
+            cleared = true;
+        }
+        return cleared;
+    }
+
+    private void moveLivingAside(Entity entity) {
+        Direction travel = mode == ScoutMode.MANUAL_REVERSE ? noseHeading.getOpposite() : noseHeading;
+        double tangentX = travel.getStepX();
+        double tangentZ = travel.getStepZ();
+        double lateralX = -tangentZ;
+        double lateralZ = tangentX;
+        double side = shoveSide(entity, lateralX, lateralZ);
+        entity.move(MoverType.PISTON,
+                new Vec3(lateralX * side * 0.72 + tangentX * 0.12, 0.05,
+                        lateralZ * side * 0.72 + tangentZ * 0.12));
+        entity.push(lateralX * side * LIVING_SHOVE + tangentX * 0.1, 0.05,
+                lateralZ * side * LIVING_SHOVE + tangentZ * 0.1);
+    }
+
+    private void restoreCommandedSpeed() {
+        if (commandedHorizontalSpeed <= 1.0e-5) return;
+        Direction travel = mode == ScoutMode.MANUAL_REVERSE ? noseHeading.getOpposite() : noseHeading;
+        Vec3 motion = getDeltaMovement();
+        double along = motion.x * travel.getStepX() + motion.z * travel.getStepZ();
+        if (along + 1.0e-5 >= commandedHorizontalSpeed) return;
+        setDeltaMovement(travel.getStepX() * commandedHorizontalSpeed, motion.y,
+                travel.getStepZ() * commandedHorizontalSpeed);
     }
 
     private void shoveEntity(Entity entity) {
@@ -761,10 +822,15 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         }
         double lateralX = -tangentZ;
         double lateralZ = tangentX;
-        double lateral = (entity.getX() - getX()) * lateralX + (entity.getZ() - getZ()) * lateralZ;
-        double side = Math.abs(lateral) > 0.05 ? Math.signum(lateral) : ((entity.getUUID().hashCode() & 1) == 0 ? 1 : -1);
+        double side = shoveSide(entity, lateralX, lateralZ);
         entity.push(lateralX * side * LIVING_SHOVE + tangentX * 0.1, 0.05,
                 lateralZ * side * LIVING_SHOVE + tangentZ * 0.1);
+    }
+
+    private double shoveSide(Entity entity, double lateralX, double lateralZ) {
+        double lateral = (entity.getX() - getX()) * lateralX + (entity.getZ() - getZ()) * lateralZ;
+        return Math.abs(lateral) > 0.05 ? Math.signum(lateral)
+                : ((entity.getUUID().hashCode() & 1) == 0 ? 1 : -1);
     }
 
     private boolean isForwardTerminus(BlockPos rail) {
@@ -1036,6 +1102,8 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         tag.putLong("Origin", route.origin().asLong());
         tag.putString("OriginHeading", route.originHeading().getName());
         tag.putLong("Endpoint", route.endpoint().asLong());
+        tag.putString("Kind", route.kind().name());
+        if (route.beaconTarget() != null) tag.putLong("BeaconTarget", route.beaconTarget().asLong());
         ListTag steps = new ListTag();
         for (RouteStep step : route.steps()) {
             CompoundTag stepTag = new CompoundTag();
@@ -1061,8 +1129,14 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         }
         Direction heading = Direction.byName(tag.getString("OriginHeading"));
         if (heading == null || !heading.getAxis().isHorizontal()) heading = Direction.NORTH;
+        RouteKind kind;
+        try { kind = RouteKind.valueOf(tag.getString("Kind")); }
+        catch (IllegalArgumentException exception) { kind = RouteKind.SURVEY; }
+        BlockPos beacon = kind == RouteKind.BEACON && tag.contains("BeaconTarget", Tag.TAG_LONG)
+                ? BlockPos.of(tag.getLong("BeaconTarget")) : null;
+        if (kind == RouteKind.BEACON && beacon == null) kind = RouteKind.SURVEY;
         return new RouteProposal(tag.getInt("Id"), tag.getLong("Generation"), BlockPos.of(tag.getLong("Origin")),
-                heading, BlockPos.of(tag.getLong("Endpoint")), steps);
+                heading, BlockPos.of(tag.getLong("Endpoint")), steps, kind, beacon);
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.bettercontent.railscout.navigation;
 
+import com.bettercontent.railscout.RailScoutRegistries;
 import it.unimi.dsi.fastutil.longs.Long2ByteMap;
 import it.unimi.dsi.fastutil.longs.Long2ByteMaps;
 import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
@@ -16,6 +17,7 @@ import net.minecraft.world.level.block.state.properties.RailShape;
 import javax.annotation.Nullable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -30,6 +32,7 @@ import java.util.stream.IntStream;
 
 public final class TerrainRoutePlanner {
     public static final int MINIMUM_NODE_CAP = 262_144;
+    private static final int MAX_BEACON_ROUTES = 3;
     private static final int SEARCH_THREADS = Math.max(1,
             Math.min(8, Runtime.getRuntime().availableProcessors() - 1));
     private static final ForkJoinPool SEARCH_POOL = new ForkJoinPool(SEARCH_THREADS, pool -> {
@@ -148,6 +151,7 @@ public final class TerrainRoutePlanner {
         private final Map<BlockPos, Placement> placements = new HashMap<>();
         private final Set<BlockPos> blocked = new HashSet<>();
         private final Map<BlockPos, WorldCell> world = new HashMap<>();
+        private final Set<BlockPos> beacons = new HashSet<>();
 
         private TerrainMeshBuilder(Level level, BlockPos origin, int railCap) {
             this.level = level;
@@ -210,9 +214,14 @@ public final class TerrainRoutePlanner {
 
         private void sampleWorld(BlockPos pos) {
             BlockPos immutable = pos.immutable();
-            world.computeIfAbsent(immutable, key -> level.isLoaded(key)
-                    ? new WorldCell(true, BaseRailBlock.isRail(level.getBlockState(key)))
-                    : new WorldCell(false, false));
+            if (world.containsKey(immutable)) return;
+            if (!level.isLoaded(immutable)) {
+                world.put(immutable, new WorldCell(false, false));
+                return;
+            }
+            BlockState state = level.getBlockState(immutable);
+            if (state.is(RailScoutRegistries.ROUTE_BEACON.get())) beacons.add(immutable);
+            world.put(immutable, new WorldCell(true, BaseRailBlock.isRail(state)));
         }
 
         private TerrainMesh freeze() {
@@ -224,11 +233,12 @@ public final class TerrainRoutePlanner {
                     (byte) (cell.loaded ? cell.rail ? 2 : 1 : 0)));
             packedWorld.defaultReturnValue((byte) 0);
             return new TerrainMesh(Long2ObjectMaps.unmodifiable(packedPlacements),
-                    Long2ByteMaps.unmodifiable(packedWorld));
+                    Long2ByteMaps.unmodifiable(packedWorld), Set.copyOf(beacons));
         }
     }
 
-    private record TerrainMesh(Long2ObjectMap<Placement> placements, Long2ByteMap world) {
+    private record TerrainMesh(Long2ObjectMap<Placement> placements, Long2ByteMap world,
+                               Set<BlockPos> beacons) {
         @Nullable Placement placement(BlockPos pos) { return placements.get(pos.asLong()); }
         boolean loadedAndRailFree(BlockPos pos) {
             return world.get(pos.asLong()) == 1;
@@ -252,12 +262,12 @@ public final class TerrainRoutePlanner {
 
         while (!frontier.isEmpty()) {
             if (cancelled.get()) {
-                publish(published, origin, originHeading, generation, endpoints, completedDepth,
+                publish(published, mesh, origin, originHeading, generation, endpoints, completedDepth,
                         examined, CompletionReason.CANCELLED);
                 return;
             }
             if (examined + frontier.size() > nodeCap) {
-                publish(published, origin, originHeading, generation, endpoints, completedDepth,
+                publish(published, mesh, origin, originHeading, generation, endpoints, completedDepth,
                         examined, CompletionReason.NODE_LIMIT);
                 return;
             }
@@ -268,12 +278,12 @@ public final class TerrainRoutePlanner {
             examined += frontier.size();
             completedDepth = depth;
             if (depth >= railCap) {
-                publish(published, origin, originHeading, generation, endpoints, completedDepth,
+                publish(published, mesh, origin, originHeading, generation, endpoints, completedDepth,
                         examined, CompletionReason.RAIL_CAP);
                 return;
             }
             if (previewRequested.getAndSet(false)) {
-                publish(published, origin, originHeading, generation, endpoints, completedDepth,
+                publish(published, mesh, origin, originHeading, generation, endpoints, completedDepth,
                         examined, CompletionReason.SEARCHING);
             }
 
@@ -296,7 +306,7 @@ public final class TerrainRoutePlanner {
             }
             frontier = List.copyOf(next);
         }
-        publish(published, origin, originHeading, generation, endpoints, completedDepth,
+        publish(published, mesh, origin, originHeading, generation, endpoints, completedDepth,
                 examined, CompletionReason.EXHAUSTED);
     }
 
@@ -389,24 +399,55 @@ public final class TerrainRoutePlanner {
     private static long bloomBitA(long hash) { return 1L << (hash & 63); }
     private static long bloomBitB(long hash) { return 1L << ((hash >>> 32) & 63); }
 
-    private static void publish(AtomicReference<SearchSnapshot> target, BlockPos origin, Direction heading,
+    private static void publish(AtomicReference<SearchSnapshot> target, TerrainMesh mesh,
+                                BlockPos origin, Direction heading,
                                 long generation, Map<BlockPos, Node> endpoints, int depth, int examined,
                                 CompletionReason reason) {
-        List<Node> diverse = RouteDiversitySelector.select(origin, endpoints.values(), node -> node.pos, 3, 7);
-        List<RouteProposal> result = new ArrayList<>(diverse.size());
-        for (int index = 0; index < diverse.size(); index++) {
-            Node endpoint = diverse.get(index);
-            List<Node> path = reconstruct(endpoint);
-            List<RouteStep> steps = new ArrayList<>(path.size());
-            for (int step = 0; step < path.size(); step++) {
-                BlockPos previous = step == 0 ? origin : path.get(step - 1).pos;
-                BlockPos current = path.get(step).pos;
-                BlockPos next = step + 1 < path.size() ? path.get(step + 1).pos : null;
-                steps.add(new RouteStep(current, shapeFor(previous, current, next), path.get(step).supportPos));
-            }
-            result.add(new RouteProposal(index, generation, origin, heading, endpoint.pos, steps));
+        List<BeaconPath> beaconPaths = mesh.beacons().stream()
+                .map(beacon -> shortestBeaconPath(beacon, endpoints.values()))
+                .filter(java.util.Objects::nonNull)
+                .sorted(Comparator.comparingInt((BeaconPath path) -> path.endpoint.depth)
+                        .thenComparingLong(path -> path.beacon.asLong()))
+                .limit(MAX_BEACON_ROUTES)
+                .toList();
+        Set<BlockPos> reservedEndpoints = beaconPaths.stream()
+                .map(path -> path.endpoint.pos).collect(java.util.stream.Collectors.toSet());
+        List<Node> surveyEndpoints = endpoints.values().stream()
+                .filter(node -> !reservedEndpoints.contains(node.pos)).toList();
+        List<Node> diverse = RouteDiversitySelector.select(origin, surveyEndpoints, node -> node.pos, 3, 7);
+        List<RouteProposal> result = new ArrayList<>(diverse.size() + beaconPaths.size());
+        for (Node endpoint : diverse) {
+            result.add(proposal(result.size(), generation, origin, heading, endpoint, RouteKind.SURVEY, null));
+        }
+        for (BeaconPath path : beaconPaths) {
+            result.add(proposal(result.size(), generation, origin, heading,
+                    path.endpoint, RouteKind.BEACON, path.beacon));
         }
         target.set(new SearchSnapshot(result, depth, examined, reason));
+    }
+
+    @Nullable
+    private static BeaconPath shortestBeaconPath(BlockPos beacon, java.util.Collection<Node> endpoints) {
+        return endpoints.stream()
+                .filter(node -> node.pos.getY() == beacon.getY()
+                        && Math.abs(node.pos.getX() - beacon.getX())
+                        + Math.abs(node.pos.getZ() - beacon.getZ()) == 1)
+                .min(Comparator.comparingInt((Node node) -> node.depth).thenComparingLong(node -> node.sequence))
+                .map(node -> new BeaconPath(beacon, node))
+                .orElse(null);
+    }
+
+    private static RouteProposal proposal(int id, long generation, BlockPos origin, Direction heading,
+                                          Node endpoint, RouteKind kind, @Nullable BlockPos beacon) {
+        List<Node> path = reconstruct(endpoint);
+        List<RouteStep> steps = new ArrayList<>(path.size());
+        for (int step = 0; step < path.size(); step++) {
+            BlockPos previous = step == 0 ? origin : path.get(step - 1).pos;
+            BlockPos current = path.get(step).pos;
+            BlockPos next = step + 1 < path.size() ? path.get(step + 1).pos : null;
+            steps.add(new RouteStep(current, shapeFor(previous, current, next), path.get(step).supportPos));
+        }
+        return new RouteProposal(id, generation, origin, heading, endpoint.pos, steps, kind, beacon);
     }
 
     private static List<Node> reconstruct(Node endpoint) {
@@ -453,6 +494,10 @@ public final class TerrainRoutePlanner {
         if (!originIsUsable(level, proposal.origin()) || !routeMetadataIsValid(proposal)) {
             return false;
         }
+        if (proposal.kind() == RouteKind.BEACON
+                && !level.getBlockState(proposal.beaconTarget()).is(RailScoutRegistries.ROUTE_BEACON.get())) {
+            return false;
+        }
         for (int index = 0; index < proposal.steps().size(); index++) {
             if (!isUnbuiltStepValid(level, proposal, index)) {
                 return false;
@@ -474,6 +519,14 @@ public final class TerrainRoutePlanner {
     private static boolean routeMetadataIsValid(RouteProposal proposal) {
         List<RouteStep> steps = proposal.steps();
         if (steps.isEmpty() || !proposal.endpoint().equals(steps.get(steps.size() - 1).railPos())) {
+            return false;
+        }
+        if (proposal.kind() == RouteKind.BEACON) {
+            BlockPos beacon = proposal.beaconTarget();
+            if (beacon == null || proposal.endpoint().getY() != beacon.getY()
+                    || Math.abs(proposal.endpoint().getX() - beacon.getX())
+                    + Math.abs(proposal.endpoint().getZ() - beacon.getZ()) != 1) return false;
+        } else if (proposal.beaconTarget() != null) {
             return false;
         }
         Direction incoming = proposal.originHeading();
@@ -637,6 +690,7 @@ public final class TerrainRoutePlanner {
     private record Placement(@Nullable BlockPos supportPos) {}
     private record MeshPoint(BlockPos pos, int depth) {}
     private record WorldCell(boolean loaded, boolean rail) {}
+    private record BeaconPath(BlockPos beacon, Node endpoint) {}
     private record Key(BlockPos pos, Direction incoming, boolean hasTurn, int straightSinceTurn) {}
     private record Candidate(
             BlockPos pos,

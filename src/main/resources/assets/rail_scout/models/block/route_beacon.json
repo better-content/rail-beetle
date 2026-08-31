@@ -1,0 +1,34 @@
+{
+  "textures": {
+    "particle": "minecraft:block/stripped_oak_log",
+    "wood": "minecraft:block/stripped_oak_log",
+    "copper": "minecraft:block/copper_block",
+    "marker": "minecraft:block/redstone_block"
+  },
+  "elements": [
+    {
+      "from": [6, 0, 6], "to": [10, 12, 10],
+      "faces": {
+        "north": { "texture": "#wood" }, "south": { "texture": "#wood" },
+        "east": { "texture": "#wood" }, "west": { "texture": "#wood" },
+        "up": { "texture": "#wood" }, "down": { "texture": "#wood" }
+      }
+    },
+    {
+      "from": [4, 11, 4], "to": [12, 14, 12],
+      "faces": {
+        "north": { "texture": "#copper" }, "south": { "texture": "#copper" },
+        "east": { "texture": "#copper" }, "west": { "texture": "#copper" },
+        "up": { "texture": "#copper" }, "down": { "texture": "#copper" }
+      }
+    },
+    {
+      "from": [6, 14, 6], "to": [10, 16, 10],
+      "faces": {
+        "north": { "texture": "#marker" }, "south": { "texture": "#marker" },
+        "east": { "texture": "#marker" }, "west": { "texture": "#marker" },
+        "up": { "texture": "#marker" }, "down": { "texture": "#marker" }
+      }
+    }
+  ]
+}

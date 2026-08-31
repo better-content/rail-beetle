@@ -1,6 +1,7 @@
 package com.bettercontent.railscout.client;
 
 import com.bettercontent.railscout.navigation.RouteProposal;
+import com.bettercontent.railscout.navigation.RouteSupplyStatus;
 import net.minecraft.client.Minecraft;
 import com.bettercontent.railscout.entity.RailScoutEntity;
 import net.minecraft.world.phys.Vec3;
@@ -20,13 +21,25 @@ public final class ClientRouteStore {
     private ClientRouteStore() {}
 
     public static void receive(int entityId, List<RouteProposal> proposals) {
-        receive(entityId, proposals, null);
+        receive(entityId, proposals, java.util.Collections.nCopies(proposals.size(), RouteSupplyStatus.READY), null);
     }
 
     public static void receive(int entityId, List<RouteProposal> proposals, @Nullable RouteProposal activeRoute) {
+        receive(entityId, proposals, java.util.Collections.nCopies(proposals.size(), RouteSupplyStatus.READY), activeRoute);
+    }
+
+    public static void receive(int entityId, List<RouteProposal> proposals, List<RouteSupplyStatus> supplies,
+                               @Nullable RouteProposal activeRoute) {
         knownLevel = Minecraft.getInstance().level;
         if (proposals.isEmpty() && activeRoute == null) ROUTES.remove(entityId);
-        else ROUTES.put(entityId, new RouteSet(List.copyOf(proposals), activeRoute));
+        else {
+            Map<Integer, RouteSupplyStatus> byRoute = new HashMap<>();
+            for (int index = 0; index < proposals.size(); index++) {
+                RouteSupplyStatus status = index < supplies.size() ? supplies.get(index) : RouteSupplyStatus.READY;
+                byRoute.put(proposals.get(index).id(), status);
+            }
+            ROUTES.put(entityId, new RouteSet(List.copyOf(proposals), Map.copyOf(byRoute), activeRoute));
+        }
         if (activeRoute != null && lastControlledScout < 0) lastControlledScout = entityId;
     }
 
@@ -69,7 +82,8 @@ public final class ClientRouteStore {
                             || distance.angle() == bestAngle && distance.alongRay() < bestAlongRay)) {
                         bestAngle = distance.angle();
                         bestAlongRay = distance.alongRay();
-                        best = new Selection(entry.getKey(), route);
+                        best = new Selection(entry.getKey(), route,
+                                entry.getValue().supplies().getOrDefault(route.id(), RouteSupplyStatus.READY));
                     }
                     previous = current;
                 }
@@ -81,7 +95,8 @@ public final class ClientRouteStore {
     @Nullable
     public static ActionTarget contextualTarget() {
         Selection selected = crosshairSelection();
-        if (selected != null) return new ActionTarget(selected.entityId(), Action.FOLLOW, selected.route());
+        if (selected != null) return new ActionTarget(selected.entityId(), Action.FOLLOW,
+                selected.route(), selected.supply());
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) return null;
         RailScoutEntity fallback = scoutWithActiveRoute(lastControlledScout);
@@ -95,7 +110,7 @@ public final class ClientRouteStore {
         }
         if (fallback == null) return null;
         Action action = fallback.mode().moves() ? Action.STOP : Action.CLEAR;
-        return new ActionTarget(fallback.getId(), action, null);
+        return new ActionTarget(fallback.getId(), action, null, RouteSupplyStatus.READY);
     }
 
     @Nullable
@@ -141,8 +156,10 @@ public final class ClientRouteStore {
     }
 
     public enum Action { FOLLOW, STOP, CLEAR }
-    public record RouteSet(List<RouteProposal> proposals, @Nullable RouteProposal activeRoute) {}
-    public record Selection(int entityId, RouteProposal route) {}
-    public record ActionTarget(int entityId, Action action, @Nullable RouteProposal route) {}
+    public record RouteSet(List<RouteProposal> proposals, Map<Integer, RouteSupplyStatus> supplies,
+                           @Nullable RouteProposal activeRoute) {}
+    public record Selection(int entityId, RouteProposal route, RouteSupplyStatus supply) {}
+    public record ActionTarget(int entityId, Action action, @Nullable RouteProposal route,
+                               RouteSupplyStatus supply) {}
     private record RayDistance(double angle, double alongRay) {}
 }

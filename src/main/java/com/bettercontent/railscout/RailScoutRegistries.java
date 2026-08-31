@@ -1,12 +1,16 @@
 package com.bettercontent.railscout;
 
 import com.bettercontent.railscout.entity.RailScoutEntity;
+import com.bettercontent.railscout.block.RouteBeaconBlock;
 import com.bettercontent.railscout.item.RailScoutItem;
 import com.bettercontent.railscout.menu.RailScoutMenu;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.common.extensions.IForgeMenuType;
@@ -20,6 +24,8 @@ public final class RailScoutRegistries {
             DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, RailScoutMod.MOD_ID);
     private static final DeferredRegister<Item> ITEMS =
             DeferredRegister.create(ForgeRegistries.ITEMS, RailScoutMod.MOD_ID);
+    private static final DeferredRegister<Block> BLOCKS =
+            DeferredRegister.create(ForgeRegistries.BLOCKS, RailScoutMod.MOD_ID);
     private static final DeferredRegister<MenuType<?>> MENUS =
             DeferredRegister.create(ForgeRegistries.MENU_TYPES, RailScoutMod.MOD_ID);
     private static final DeferredRegister<SoundEvent> SOUNDS =
@@ -36,6 +42,12 @@ public final class RailScoutRegistries {
     public static final RegistryObject<Item> RAIL_SCOUT_ITEM = ITEMS.register(
             "rail_scout", () -> new RailScoutItem(new Item.Properties().stacksTo(1)));
 
+    public static final RegistryObject<Block> ROUTE_BEACON = BLOCKS.register(
+            "route_beacon", () -> new RouteBeaconBlock(Block.Properties.copy(Blocks.OAK_FENCE).noOcclusion()));
+
+    public static final RegistryObject<Item> ROUTE_BEACON_ITEM = ITEMS.register(
+            "route_beacon", () -> new BlockItem(ROUTE_BEACON.get(), new Item.Properties()));
+
     public static final RegistryObject<MenuType<RailScoutMenu>> RAIL_SCOUT_MENU = MENUS.register(
             "rail_scout", () -> IForgeMenuType.create(RailScoutMenu::fromNetwork));
 
@@ -46,6 +58,7 @@ public final class RailScoutRegistries {
 
     public static void register(IEventBus bus) {
         ENTITIES.register(bus);
+        BLOCKS.register(bus);
         ITEMS.register(bus);
         MENUS.register(bus);
         SOUNDS.register(bus);

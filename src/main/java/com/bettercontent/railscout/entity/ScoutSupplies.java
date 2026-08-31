@@ -1,6 +1,8 @@
 package com.bettercontent.railscout.entity;
 
 import com.bettercontent.railscout.RailScoutTags;
+import com.bettercontent.railscout.navigation.RouteProposal;
+import com.bettercontent.railscout.navigation.RouteSupplyStatus;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
@@ -55,7 +57,35 @@ public final class ScoutSupplies {
 
     @Nullable
     public static BlockItem takeSupport(ItemStackHandler inventory) {
-        return takeBlock(inventory, ScoutSupplies::isSupport);
+        int bestSlot = -1;
+        int bestBurnTime = Integer.MAX_VALUE;
+        for (int slot = 0; slot < inventory.getSlots(); slot++) {
+            ItemStack stack = inventory.getStackInSlot(slot);
+            if (!isSupport(stack)) continue;
+            int burnTime = Math.max(0, ForgeHooks.getBurnTime(stack, RecipeType.SMELTING));
+            if (burnTime < bestBurnTime) {
+                bestBurnTime = burnTime;
+                bestSlot = slot;
+            }
+        }
+        if (bestSlot < 0) return null;
+        return (BlockItem) inventory.extractItem(bestSlot, 1, false).getItem();
+    }
+
+    public static RouteSupplyStatus supplyStatus(ItemStackHandler inventory, int bufferedFuelTicks,
+                                                  RouteProposal route) {
+        ItemStackHandler simulated = new ItemStackHandler(inventory.getSlots());
+        for (int slot = 0; slot < inventory.getSlots(); slot++) {
+            simulated.setStackInSlot(slot, inventory.getStackInSlot(slot).copy());
+        }
+        boolean missingFuel = bufferedFuelTicks <= 0 && takeFuel(simulated) <= 0;
+        int missingRails = 0;
+        int missingSupports = 0;
+        for (var step : route.steps()) {
+            if (takeRail(simulated, step.shape()) == null) missingRails++;
+            if (step.supportPos() != null && takeSupport(simulated) == null) missingSupports++;
+        }
+        return new RouteSupplyStatus(missingRails, missingSupports, missingFuel);
     }
 
     public static int takeFuel(ItemStackHandler inventory) {

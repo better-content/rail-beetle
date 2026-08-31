@@ -3,6 +3,8 @@ package com.bettercontent.railscout.client;
 import com.bettercontent.railscout.RailScoutMod;
 import com.bettercontent.railscout.RailScoutRegistries;
 import com.bettercontent.railscout.navigation.RouteProposal;
+import com.bettercontent.railscout.navigation.RouteKind;
+import com.bettercontent.railscout.navigation.RouteSupplyStatus;
 import com.bettercontent.railscout.network.RailScoutNetwork;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -11,6 +13,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.EntityRenderersEvent;
@@ -91,15 +94,24 @@ public final class RailScoutClient {
             Component detail;
             Component action;
             int accent = 0xffd7e7ec;
+            int actionColor = 0xffffffff;
             if (target.action() == ClientRouteStore.Action.FOLLOW && target.route() != null) {
                 RouteProposal route = target.route();
                 int colorIndex = Math.floorMod(route.id(), COLORS.length);
                 int[] color = COLORS[colorIndex];
                 accent = 0xff000000 | color[0] << 16 | color[1] << 8 | color[2];
-                detail = Component.translatable("hud.rail_scout.route",
-                        Component.translatable("hud.rail_scout.route." + colorIndex),
+                Component routeName = Component.translatable("hud.rail_scout.route." + colorIndex);
+                if (route.kind() == RouteKind.BEACON) {
+                    routeName = Component.translatable("hud.rail_scout.route.beacon", routeName);
+                }
+                detail = Component.translatable("hud.rail_scout.route", routeName,
                         route.railCount(), route.supportCount());
-                action = Component.translatable("hud.rail_scout.follow");
+                if (target.supply().hasMissing()) {
+                    action = Component.translatable("hud.rail_scout.follow_missing", missingSupplies(target.supply()));
+                    actionColor = 0xffff5555;
+                } else {
+                    action = Component.translatable("hud.rail_scout.follow");
+                }
             } else if (target.action() == ClientRouteStore.Action.STOP) {
                 detail = Component.translatable("hud.rail_scout.active");
                 action = Component.translatable("hud.rail_scout.stop");
@@ -116,7 +128,26 @@ public final class RailScoutClient {
             var graphics = event.getGuiGraphics();
             graphics.fill(x - 4, y - 3, x + width, y + 20, 0xb012171a);
             graphics.drawString(minecraft.font, detail, x, y, accent, true);
-            graphics.drawString(minecraft.font, action, x, y + 10, 0xffffffff, true);
+            graphics.drawString(minecraft.font, action, x, y + 10, actionColor, true);
+        }
+
+        private static Component missingSupplies(RouteSupplyStatus status) {
+            MutableComponent result = Component.empty();
+            boolean needsSeparator = false;
+            if (status.missingRails() > 0) {
+                result.append(Component.translatable("hud.rail_scout.missing.rails", status.missingRails()));
+                needsSeparator = true;
+            }
+            if (status.missingSupports() > 0) {
+                if (needsSeparator) result.append(Component.literal(" · "));
+                result.append(Component.translatable("hud.rail_scout.missing.supports", status.missingSupports()));
+                needsSeparator = true;
+            }
+            if (status.missingFuel()) {
+                if (needsSeparator) result.append(Component.literal(" · "));
+                result.append(Component.translatable("hud.rail_scout.missing.fuel"));
+            }
+            return result;
         }
 
         @SubscribeEvent

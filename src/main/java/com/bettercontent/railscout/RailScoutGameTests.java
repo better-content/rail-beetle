@@ -2,7 +2,9 @@ package com.bettercontent.railscout;
 
 import com.bettercontent.railscout.entity.RailScoutEntity;
 import com.bettercontent.railscout.entity.ScoutMode;
+import com.bettercontent.railscout.entity.ScoutSupplies;
 import com.bettercontent.railscout.navigation.RouteProposal;
+import com.bettercontent.railscout.navigation.RouteKind;
 import com.bettercontent.railscout.navigation.RouteObstructions;
 import com.bettercontent.railscout.navigation.RouteStep;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
@@ -26,6 +28,7 @@ import net.minecraftforge.fml.ModList;
 import net.minecraftforge.gametest.GameTestHolder;
 import net.minecraftforge.gametest.PrefixGameTestTemplate;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.items.ItemStackHandler;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -50,6 +53,36 @@ public final class RailScoutGameTests {
         helper.assertTrue(ModList.get().isLoaded("yungsapi"), "YUNG's API 4.0.6 must be loaded");
         helper.assertTrue(ForgeRegistries.SOUND_EVENTS.containsKey(ResourceLocation.fromNamespaceAndPath(RailScoutMod.MOD_ID, "whistle")),
                 "Rail Scout whistle sound event must be registered");
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void suppliesPreserveValuableFuelAndReportShortages(GameTestHelper helper) {
+        ItemStackHandler supports = new ItemStackHandler(3);
+        supports.setStackInSlot(0, new ItemStack(Blocks.COAL_BLOCK));
+        supports.setStackInSlot(1, new ItemStack(Blocks.OAK_PLANKS));
+        supports.setStackInSlot(2, new ItemStack(Blocks.COBBLESTONE));
+        helper.assertTrue(ScoutSupplies.takeSupport(supports).getBlock() == Blocks.COBBLESTONE,
+                "non-fuel supports must be consumed first");
+        helper.assertTrue(ScoutSupplies.takeSupport(supports).getBlock() == Blocks.OAK_PLANKS,
+                "lower-value fuel supports must precede coal blocks");
+        helper.assertTrue(ScoutSupplies.takeSupport(supports).getBlock() == Blocks.COAL_BLOCK,
+                "coal blocks must be preserved until no cheaper support remains");
+
+        ItemStackHandler inventory = new ItemStackHandler(3);
+        inventory.setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL));
+        inventory.setStackInSlot(1, new ItemStack(Blocks.RAIL, 2));
+        inventory.setStackInSlot(2, new ItemStack(Blocks.COBBLESTONE));
+        RouteProposal route = new RouteProposal(0, 1L, BlockPos.ZERO, Direction.EAST,
+                new BlockPos(3, 0, 0), List.of(
+                new RouteStep(new BlockPos(1, 0, 0), RailShape.EAST_WEST, null),
+                new RouteStep(new BlockPos(2, 0, 0), RailShape.EAST_WEST, new BlockPos(2, -1, 0)),
+                new RouteStep(new BlockPos(3, 0, 0), RailShape.EAST_WEST, null)));
+        var status = ScoutSupplies.supplyStatus(inventory, 0, route);
+        helper.assertTrue(status.missingRails() == 1 && status.missingSupports() == 0 && !status.missingFuel(),
+                "route warning must report exact simulated shortages");
+        helper.assertTrue(inventory.getStackInSlot(0).getCount() == 1,
+                "shortage simulation must not mutate the Scout inventory");
         helper.succeed();
     }
 
@@ -82,6 +115,33 @@ public final class RailScoutGameTests {
             // Bounded deterministic search; finish synchronously inside the test.
         }
         helper.assertTrue(session.proposals().isEmpty(), "planner must reject rail beside an unrelated existing rail");
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void plannerAddsShortestRouteBesideBeacon(GameTestHelper helper) {
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 2, 4));
+        prepareSouthCorridor(helper, origin, 7);
+        BlockPos beacon = origin.south(7);
+        helper.getLevel().setBlockAndUpdate(beacon, RailScoutRegistries.ROUTE_BEACON.get().defaultBlockState());
+
+        TerrainRoutePlanner.Session session = TerrainRoutePlanner.begin(
+                helper.getLevel(), origin, Direction.SOUTH, 8, 44L);
+        while (!session.advance(4_096)) {
+            // Complete the bounded mesh/search synchronously.
+        }
+        RouteProposal route = session.proposals().stream()
+                .filter(proposal -> proposal.kind() == RouteKind.BEACON)
+                .findFirst().orElse(null);
+        helper.assertTrue(route != null, "a reachable Route Beacon must add a targeted proposal");
+        helper.assertTrue(route.beaconTarget().equals(beacon), "beacon proposal must retain its target");
+        helper.assertTrue(route.endpoint().equals(beacon.north()),
+                "beacon proposal must end on the shortest legal adjacent rail position");
+        helper.assertTrue(TerrainRoutePlanner.isRouteStillValid(helper.getLevel(), route),
+                "beacon proposal must pass ordinary route validation while its target exists");
+        helper.getLevel().removeBlock(beacon, false);
+        helper.assertTrue(!TerrainRoutePlanner.isRouteStillValid(helper.getLevel(), route),
+                "removing a beacon before selection must invalidate its proposal");
         helper.succeed();
     }
 
@@ -228,7 +288,11 @@ public final class RailScoutGameTests {
         helper.assertTrue(blocker.getDeltaMovement().horizontalDistanceSqr() > 0.1,
                 "powered Scout must apply a strong clearing impulse to players");
         helper.onEachTick(() -> {
-            if (helper.getTick() >= 2 && helper.getTick() <= 12) samples.add(scout.getX());
+            if (helper.getTick() >= 2 && helper.getTick() <= 12) {
+                blocker.setPos(scout.getX() + 0.28, scout.getY(), scout.getZ());
+                blocker.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
+                samples.add(scout.getX());
+            }
         });
 
         helper.runAfterDelay(20, () -> {

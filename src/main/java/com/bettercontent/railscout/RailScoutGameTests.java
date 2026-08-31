@@ -1,11 +1,15 @@
 package com.bettercontent.railscout;
 
 import com.bettercontent.railscout.entity.RailScoutEntity;
+import com.bettercontent.railscout.entity.ScoutMode;
 import com.bettercontent.railscout.navigation.RouteProposal;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
+import com.bettercontent.railscout.network.ScoutControl;
 import com.simibubi.create.content.contraptions.minecart.capability.CapabilityMinecartController;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -16,6 +20,7 @@ import net.minecraft.world.level.block.state.properties.RailShape;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.gametest.GameTestHolder;
 import net.minecraftforge.gametest.PrefixGameTestTemplate;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -33,6 +38,40 @@ public final class RailScoutGameTests {
         helper.assertTrue(ModList.get().isLoaded("alexscaves"), "Alex's Caves 2.0.2 must be loaded");
         helper.assertTrue(ModList.get().isLoaded("bettercaves"), "YUNG's Better Caves 2.0.6 must be loaded");
         helper.assertTrue(ModList.get().isLoaded("yungsapi"), "YUNG's API 4.0.6 must be loaded");
+        helper.assertTrue(ForgeRegistries.SOUND_EVENTS.containsKey(new ResourceLocation(RailScoutMod.MOD_ID, "whistle")),
+                "Rail Scout whistle sound event must be registered");
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void plannerNeverEntersWater(GameTestHelper helper) {
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 2, 4));
+        prepareSingleExit(helper, origin);
+        helper.getLevel().setBlockAndUpdate(origin.north(), Blocks.WATER.defaultBlockState());
+
+        TerrainRoutePlanner.Session session = TerrainRoutePlanner.begin(helper.getLevel(), origin, Direction.NORTH, 8, 42L);
+        while (!session.advance(4_096)) {
+            // Bounded deterministic search; finish synchronously inside the test.
+        }
+        helper.assertTrue(session.proposals().isEmpty(), "planner must reject a fluid-filled rail space");
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void plannerNeverBuildsBesideExistingRail(GameTestHelper helper) {
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 2, 4));
+        prepareSingleExit(helper, origin);
+        BlockPos candidate = origin.north();
+        helper.getLevel().setBlockAndUpdate(candidate,
+                Blocks.AIR.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(candidate.east(),
+                Blocks.RAIL.defaultBlockState());
+
+        TerrainRoutePlanner.Session session = TerrainRoutePlanner.begin(helper.getLevel(), origin, Direction.NORTH, 8, 43L);
+        while (!session.advance(4_096)) {
+            // Bounded deterministic search; finish synchronously inside the test.
+        }
+        helper.assertTrue(session.proposals().isEmpty(), "planner must reject rail beside an unrelated existing rail");
         helper.succeed();
     }
 
@@ -81,6 +120,35 @@ public final class RailScoutGameTests {
         });
     }
 
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void repeatedForwardControlPreservesLampDirection(GameTestHelper helper) {
+        BlockPos rail = helper.absolutePos(new BlockPos(4, 2, 4));
+        for (int x = -1; x <= 1; x++) {
+            helper.getLevel().setBlockAndUpdate(rail.offset(x, -1, 0), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail.offset(x, 0, 0),
+                    Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                            RailShape.EAST_WEST));
+        }
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(rail.getX() + 0.5, rail.getY() + 0.0625, rail.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        helper.getLevel().addFreshEntity(scout);
+
+        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
+        scout.control(player, ScoutControl.NORMAL_SPEED);
+        scout.control(player, ScoutControl.NORMAL_SPEED);
+        helper.assertTrue(scout.mode() == ScoutMode.MANUAL_FORWARD,
+                "repeated Forward controls must remain in forward mode");
+        helper.assertTrue(scout.noseHeading() == Direction.EAST,
+                "repeated Forward controls must not reverse the lamp-defined nose");
+        helper.assertTrue(Math.abs(scout.speedTier().blocksPerTick() - 0.2) < 1.0e-9,
+                "new 1x speed must be 4 blocks/second, twice the old base speed");
+        helper.succeed();
+    }
+
     @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 300)
     public static void scoutBuildsRailAndShallowSupportThroughCaveCorridor(GameTestHelper helper) {
         BlockPos origin = helper.absolutePos(new BlockPos(4, 2, 4));
@@ -104,13 +172,14 @@ public final class RailScoutGameTests {
         RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
         helper.assertTrue(scout != null, "Scout entity type must create");
         scout.setPos(origin.getX() + 0.5, origin.getY() + 0.0625, origin.getZ() + 0.5);
-        scout.setYRot(0.0f);
+        scout.setInitialHeading(Direction.SOUTH);
         scout.inventory().setStackInSlot(0, new ItemStack(Blocks.RAIL, 16));
         scout.inventory().setStackInSlot(1, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
         scout.inventory().setStackInSlot(2, new ItemStack(Blocks.COBBLESTONE, 16));
         helper.getLevel().addFreshEntity(scout);
 
-        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        scout.startSeenByPlayer(player);
         AtomicReference<RouteProposal> selectedRoute = new AtomicReference<>();
         helper.startSequence()
                 .thenWaitUntil(() -> helper.assertTrue(!scout.proposals().isEmpty(),
@@ -129,8 +198,8 @@ public final class RailScoutGameTests {
                     player.lookAt(EntityAnchorArgument.Anchor.EYES,
                             new net.minecraft.world.phys.Vec3(target.x, target.y, target.z));
                     scout.selectRoute(player, route.generation(), route.id());
-                    helper.assertTrue(scout.mode() == com.bettercontent.railscout.entity.ScoutMode.AUTO_BUILD,
-                            "crosshair-selected route must start immediately");
+                    helper.assertTrue(scout.mode() == ScoutMode.DEPARTING,
+                            "crosshair-selected route must start its whistle/departure phase");
                 })
                 .thenWaitUntil(() -> {
                     RouteProposal route = selectedRoute.get();
@@ -149,6 +218,21 @@ public final class RailScoutGameTests {
                     helper.assertTrue(scout.fuelTicks() > 0, "Scout must load furnace fuel while moving");
                 })
                 .thenSucceed();
+    }
+
+    private static void prepareSingleExit(GameTestHelper helper, BlockPos origin) {
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos candidate = origin.relative(direction);
+            helper.getLevel().setBlockAndUpdate(candidate.below(), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(candidate, Blocks.AIR.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(candidate.above(), Blocks.AIR.defaultBlockState());
+        }
+        helper.getLevel().setBlockAndUpdate(origin.below(), Blocks.STONE.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(origin,
+                Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                        RailShape.NORTH_SOUTH));
+        helper.getLevel().setBlockAndUpdate(origin.east(), Blocks.STONE.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(origin.west(), Blocks.STONE.defaultBlockState());
     }
 
     private record Vec3Holder(double x, double y, double z) {}

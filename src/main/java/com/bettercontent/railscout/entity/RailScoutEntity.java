@@ -477,7 +477,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
             invalidateRoute();
             return false;
         }
-        boolean needsSupport = step.supportPos() != null && level().getBlockState(step.supportPos()).isAir();
+        boolean needsSupport = step.supportPos() != null;
         if (ScoutSupplies.countRails(inventory) < 1 || (needsSupport && ScoutSupplies.countSupports(inventory) < 1)) {
             pause();
             return false;
@@ -488,7 +488,8 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
             pause();
             return false;
         }
-        if (!clearRouteObstruction(step.railPos()) || !clearRouteObstruction(step.railPos().above())) {
+        if (!clearRouteObstruction(step.railPos()) || !clearRouteObstruction(step.railPos().above())
+                || (needsSupport && !clearRouteObstruction(step.supportPos()))) {
             returnItem(new ItemStack(railItem));
             if (supportItem != null) returnItem(new ItemStack(supportItem));
             invalidateRoute();

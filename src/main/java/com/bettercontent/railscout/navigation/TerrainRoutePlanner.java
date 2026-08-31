@@ -104,7 +104,7 @@ public final class TerrainRoutePlanner {
             if (!complete) {
                 throw new IllegalStateException("Planning is not complete");
             }
-            List<Node> diverse = RouteDiversitySelector.select(origin, endpoints.values(), node -> node.pos, 3);
+            List<Node> diverse = RouteDiversitySelector.select(origin, endpoints.values(), node -> node.pos, 3, 7);
             List<RouteProposal> result = new ArrayList<>(diverse.size());
             for (int index = 0; index < diverse.size(); index++) {
                 Node endpoint = diverse.get(index);
@@ -130,6 +130,9 @@ public final class TerrainRoutePlanner {
             }
             if (current.parent != null) {
                 int previousDy = current.pos.getY() - current.parent.pos.getY();
+                if (previousDy < 0 && dy > 0) {
+                    return false;
+                }
                 if (previousDy != 0 && current.incoming.getAxis() != direction.getAxis()) {
                     return false;
                 }
@@ -148,14 +151,8 @@ public final class TerrainRoutePlanner {
                 return direction == current.incoming && dy == 0 && placement.supportPos == null;
             }
             if (placement.supportPos == null) {
-                if (dy != 0 && direction == current.incoming) {
-                    BlockPos levelCandidate = current.pos.relative(direction);
-                    Placement levelPlacement = inspect(levelCandidate);
-                    Placement levelLanding = inspect(levelCandidate.relative(direction));
-                    if (levelPlacement != null && levelPlacement.supportPos != null
-                            && levelLanding != null && levelLanding.supportPos == null) {
-                        return false;
-                    }
+                if (dy != 0 && levelBridgeRequired(level, current.pos, direction)) {
+                    return false;
                 }
                 return true;
             }
@@ -290,6 +287,9 @@ public final class TerrainRoutePlanner {
                         ? proposal.origin()
                         : steps.get(index - 2).railPos();
                 int previousDy = previous.getY() - beforePrevious.getY();
+                if (previousDy < 0 && dy > 0) {
+                    return false;
+                }
                 if (previousDy != 0 && incoming.getAxis() != outgoing.getAxis()) {
                     return false;
                 }
@@ -326,6 +326,11 @@ public final class TerrainRoutePlanner {
         BlockPos predecessor = stepIndex == 0
                 ? proposal.origin()
                 : proposal.steps().get(stepIndex - 1).railPos();
+        int verticalDelta = step.railPos().getY() - predecessor.getY();
+        Direction outgoing = horizontalDirection(predecessor, step.railPos());
+        if (verticalDelta != 0 && levelBridgeRequired(level, predecessor, outgoing)) {
+            return false;
+        }
         for (Direction side : Direction.Plane.HORIZONTAL) {
             BlockPos adjacentColumn = step.railPos().relative(side);
             for (int dy = -1; dy <= 1; dy++) {
@@ -375,16 +380,25 @@ public final class TerrainRoutePlanner {
             return null;
         }
         BlockState floorState = level.getBlockState(floor);
-        if (floorState.getFluidState().isEmpty()
-                && floorState.isFaceSturdy(level, floor, Direction.UP)
+        if (!floorState.getFluidState().isEmpty()) {
+            return null;
+        }
+        if (floorState.isAir() || RouteObstructions.isClearable(floorState)) {
+            return new Placement(floor.immutable());
+        }
+        if (floorState.isFaceSturdy(level, floor, Direction.UP)
                 && !(floorState.getBlock() instanceof BaseRailBlock)) {
             return new Placement(null);
         }
-        if (floorState.isAir()
-                && floorState.getFluidState().isEmpty()) {
-            return new Placement(floor.immutable());
-        }
         return null;
+    }
+
+    private static boolean levelBridgeRequired(Level level, BlockPos current, Direction direction) {
+        BlockPos bridge = current.relative(direction);
+        Placement bridgePlacement = inspectPlacement(level, bridge);
+        Placement landingPlacement = inspectPlacement(level, bridge.relative(direction));
+        return bridgePlacement != null && bridgePlacement.supportPos != null
+                && landingPlacement != null && landingPlacement.supportPos == null;
     }
 
     private static RailShape ascending(Direction direction) {

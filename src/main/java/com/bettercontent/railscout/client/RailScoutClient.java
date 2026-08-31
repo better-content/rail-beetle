@@ -29,7 +29,10 @@ import org.lwjgl.glfw.GLFW;
 import java.util.Map;
 
 public final class RailScoutClient {
-    private static final int[][] COLORS = {{40, 220, 255}, {90, 255, 120}, {255, 190, 55}};
+    private static final int[][] COLORS = {
+            {40, 220, 255}, {90, 255, 120}, {255, 190, 55}, {245, 95, 220},
+            {105, 145, 255}, {255, 245, 90}, {255, 95, 95}
+    };
     private static final KeyMapping SELECT_ROUTE = new KeyMapping(
             "key.rail_scout.select_route", GLFW.GLFW_KEY_G, "key.categories.rail_scout");
 

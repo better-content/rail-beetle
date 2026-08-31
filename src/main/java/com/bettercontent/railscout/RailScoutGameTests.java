@@ -84,7 +84,7 @@ public final class RailScoutGameTests {
     }
 
     @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 200)
-    public static void plannerReturnsThreeBoundedDiverseCaveFloorRoutes(GameTestHelper helper) {
+    public static void plannerReturnsSevenBoundedDiverseCaveFloorRoutes(GameTestHelper helper) {
         BlockPos origin = helper.absolutePos(new BlockPos(12, 2, 12));
         for (int x = -10; x <= 10; x++) {
             for (int z = -10; z <= 10; z++) {
@@ -101,10 +101,36 @@ public final class RailScoutGameTests {
             // Bounded deterministic search; finish synchronously inside the test.
         }
         List<RouteProposal> routes = session.proposals();
-        helper.assertTrue(routes.size() == 3, "open cave floor must produce three proposals");
+        helper.assertTrue(routes.size() == 7, "open cave floor must produce seven quality proposals");
         helper.assertTrue(routes.stream().allMatch(route -> route.railCount() <= 8), "every route must honor its rail cap");
-        helper.assertTrue(routes.stream().map(RouteProposal::endpoint).distinct().count() == 3,
+        helper.assertTrue(routes.stream().map(RouteProposal::endpoint).distinct().count() == 7,
                 "proposal endpoints must be distinct");
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 40)
+    public static void routeRevalidationRejectsSingleColumnSlopeValley(GameTestHelper helper) {
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 3, 4));
+        BlockPos lowerGap = origin.south().below();
+        BlockPos landing = origin.south(2);
+        helper.getLevel().setBlockAndUpdate(origin.below(), Blocks.STONE.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(origin,
+                Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                        RailShape.NORTH_SOUTH));
+        helper.getLevel().setBlockAndUpdate(lowerGap.below(), Blocks.STONE.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(lowerGap, Blocks.AIR.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(lowerGap.above(), Blocks.AIR.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(landing.below(), Blocks.STONE.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(landing, Blocks.AIR.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(landing.above(), Blocks.AIR.defaultBlockState());
+
+        List<RouteStep> valley = List.of(
+                new RouteStep(lowerGap, TerrainRoutePlanner.shapeFor(origin, lowerGap, landing), null),
+                new RouteStep(landing, TerrainRoutePlanner.shapeFor(lowerGap, landing, null), null));
+        RouteProposal proposal = new RouteProposal(0, 1L, origin, Direction.SOUTH, landing, valley);
+
+        helper.assertTrue(!TerrainRoutePlanner.isRouteStillValid(helper.getLevel(), proposal),
+                "route revalidation must reject a down/up slope through a paveable one-column gap");
         helper.succeed();
     }
 
@@ -566,7 +592,7 @@ public final class RailScoutGameTests {
         for (int z = 0; z <= 7; z++) {
             BlockPos railPos = origin.offset(0, 0, z);
             BlockPos floor = railPos.below();
-            helper.getLevel().setBlockAndUpdate(floor, z == 3 ? Blocks.AIR.defaultBlockState() : Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(floor, z == 3 ? Blocks.SNOW.defaultBlockState() : Blocks.STONE.defaultBlockState());
             helper.getLevel().setBlockAndUpdate(floor.below(), Blocks.STONE.defaultBlockState());
             helper.getLevel().setBlockAndUpdate(railPos, Blocks.AIR.defaultBlockState());
             helper.getLevel().setBlockAndUpdate(railPos.above(), Blocks.AIR.defaultBlockState());
@@ -600,6 +626,17 @@ public final class RailScoutGameTests {
                     RouteProposal route = scout.proposals().get(0);
                     selectedRoute.set(route);
                     helper.assertTrue(route.supportCount() == 1, "corridor route must plan exactly one shallow support");
+                    for (RouteProposal proposal : scout.proposals()) {
+                        if (proposal.steps().stream().anyMatch(step -> step.railPos().getZ() > origin.getZ() + 3)) {
+                            RouteStep bridge = proposal.steps().stream()
+                                    .filter(step -> step.railPos().equals(origin.south(3)))
+                                    .findFirst().orElseThrow();
+                            helper.assertTrue(bridge.supportPos() != null
+                                            && bridge.railPos().getY() == origin.getY()
+                                            && bridge.shape() == RailShape.NORTH_SOUTH,
+                                    "every route crossing a clearable one-column gap must pave it level");
+                        }
+                    }
                     Vec3Holder target = new Vec3Holder(
                             route.steps().get(0).railPos().getX() + 0.5,
                             route.steps().get(0).railPos().getY() + 0.2,
@@ -659,6 +696,17 @@ public final class RailScoutGameTests {
                         "Scout must plan through a deep single-column gap"))
                 .thenExecute(() -> {
                     RouteProposal route = scout.proposals().get(0);
+                    for (RouteProposal proposal : scout.proposals()) {
+                        if (proposal.steps().stream().anyMatch(step -> step.railPos().getZ() > gapRail.getZ())) {
+                            RouteStep bridge = proposal.steps().stream()
+                                    .filter(step -> step.railPos().equals(gapRail))
+                                    .findFirst().orElseThrow();
+                            helper.assertTrue(bridge.supportPos() != null
+                                            && bridge.railPos().getY() == origin.getY()
+                                            && bridge.shape() == RailShape.NORTH_SOUTH,
+                                    "every route crossing a deep one-column gap must pave it level");
+                        }
+                    }
                     RouteStep supported = route.steps().stream()
                             .filter(step -> step.supportPos() != null)
                             .findFirst().orElseThrow();

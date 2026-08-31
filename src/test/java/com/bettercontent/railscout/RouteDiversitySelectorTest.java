@@ -33,4 +33,32 @@ final class RouteDiversitySelectorTest {
                 BlockPos.ZERO, List.of(new BlockPos(2, 0, 0), new BlockPos(2, 0, 0)), value -> value, 3);
         assertEquals(List.of(new BlockPos(2, 0, 0)), selected);
     }
+
+    @Test
+    void addsUpToSevenWellSeparatedEndpoints() {
+        List<BlockPos> candidates = List.of(
+                new BlockPos(32, 0, 0), new BlockPos(-32, 0, 0),
+                new BlockPos(0, 0, 32), new BlockPos(0, 0, -32),
+                new BlockPos(24, 0, 24), new BlockPos(-24, 0, 24),
+                new BlockPos(24, 0, -24), new BlockPos(-24, 0, -24));
+
+        List<BlockPos> selected = RouteDiversitySelector.select(
+                BlockPos.ZERO, candidates, value -> value, 3, 7);
+
+        assertEquals(7, selected.size());
+        assertEquals(selected, RouteDiversitySelector.select(
+                BlockPos.ZERO, candidates, value -> value, 3, 7));
+    }
+
+    @Test
+    void filtersClusteredRoutesAfterGuaranteedThree() {
+        List<BlockPos> candidates = List.of(
+                new BlockPos(32, 0, 0), new BlockPos(-32, 0, 0), new BlockPos(0, 0, 32),
+                new BlockPos(31, 0, 1), new BlockPos(30, 0, 2), new BlockPos(1, 0, 31));
+
+        List<BlockPos> selected = RouteDiversitySelector.select(
+                BlockPos.ZERO, candidates, value -> value, 3, 7);
+
+        assertEquals(3, selected.size());
+    }
 }

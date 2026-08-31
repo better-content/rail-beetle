@@ -2,7 +2,8 @@
 
 Rail Scout is a small server-authoritative Forge 1.20.1 mod. At the end of an
 existing railway, a Scout surveys nearby cave floors once per second, presents
-three diverse terrain-following rail routes, and builds the route selected with
+three core terrain-following rail routes plus up to four more when their
+destinations are well separated, and builds the route selected with
 the crosshair and the `G` key. A Scout placed in the middle of a railway stays
 in normal driving mode instead of trying to plan from that location.
 
@@ -17,7 +18,7 @@ otherwise.
   direction; repeated forward commands never infer a new direction from yaw.
 - Open it only when needed to load tagged rails, furnace fuel, and solid support
   blocks into its 27-slot inventory, or to use the compact manual controls.
-- At a rail terminus, aim near a cyan ghost route and press `G` from anywhere
+- At a rail terminus, aim near any colored ghost route and press `G` from anywhere
   the server tracks the Scout. The highlighted route and prompt identify the
   selection. Press `G` again to stop; while stopped, press it to clear the route
   and choose another.
@@ -33,8 +34,9 @@ otherwise.
 
 The planner only traverses loaded terrain, never excavates solid blocks or routes
 underwater, and clears tagged dry vegetation, leaves, and snow layers with normal
-block drops as it builds. It bridges an isolated one-column gap at rail height
-with one supplied support block, regardless of the gap's depth. It requires
+block drops as it builds. It clears eligible material from an isolated
+one-column gap and bridges it at rail height with one supplied support block,
+regardless of the gap's depth; it never substitutes a down/up slope. It requires
 two straight rails between 90-degree turns and never places a route immediately
 beside unrelated existing rails. It accepts vanilla/Forge rail tags plus Rail
 Scout's explicit compatibility tag and rejects stale or changed routes before

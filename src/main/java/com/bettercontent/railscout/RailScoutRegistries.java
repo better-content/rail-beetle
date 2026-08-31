@@ -7,6 +7,8 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.Item;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.common.extensions.IForgeMenuType;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.registries.DeferredRegister;
@@ -20,6 +22,8 @@ public final class RailScoutRegistries {
             DeferredRegister.create(ForgeRegistries.ITEMS, RailScoutMod.MOD_ID);
     private static final DeferredRegister<MenuType<?>> MENUS =
             DeferredRegister.create(ForgeRegistries.MENU_TYPES, RailScoutMod.MOD_ID);
+    private static final DeferredRegister<SoundEvent> SOUNDS =
+            DeferredRegister.create(ForgeRegistries.SOUND_EVENTS, RailScoutMod.MOD_ID);
 
     public static final RegistryObject<EntityType<RailScoutEntity>> RAIL_SCOUT_ENTITY = ENTITIES.register(
             "rail_scout",
@@ -35,11 +39,15 @@ public final class RailScoutRegistries {
     public static final RegistryObject<MenuType<RailScoutMenu>> RAIL_SCOUT_MENU = MENUS.register(
             "rail_scout", () -> IForgeMenuType.create(RailScoutMenu::fromNetwork));
 
+    public static final RegistryObject<SoundEvent> WHISTLE = SOUNDS.register(
+            "whistle", () -> SoundEvent.createVariableRangeEvent(new ResourceLocation(RailScoutMod.MOD_ID, "whistle")));
+
     private RailScoutRegistries() {}
 
     public static void register(IEventBus bus) {
         ENTITIES.register(bus);
         ITEMS.register(bus);
         MENUS.register(bus);
+        SOUNDS.register(bus);
     }
 }

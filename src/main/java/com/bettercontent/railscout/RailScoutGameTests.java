@@ -6,7 +6,7 @@ import com.bettercontent.railscout.navigation.RouteProposal;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
 import com.bettercontent.railscout.network.ScoutControl;
 import com.simibubi.create.content.contraptions.minecart.capability.CapabilityMinecartController;
-import net.minecraft.server.level.ServerPlayer;
+import com.simibubi.create.content.contraptions.minecart.CouplingHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
@@ -23,6 +23,7 @@ import net.minecraftforge.gametest.PrefixGameTestTemplate;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
 @GameTestHolder(RailScoutMod.MOD_ID)
@@ -38,7 +39,7 @@ public final class RailScoutGameTests {
         helper.assertTrue(ModList.get().isLoaded("alexscaves"), "Alex's Caves 2.0.2 must be loaded");
         helper.assertTrue(ModList.get().isLoaded("bettercaves"), "YUNG's Better Caves 2.0.6 must be loaded");
         helper.assertTrue(ModList.get().isLoaded("yungsapi"), "YUNG's API 4.0.6 must be loaded");
-        helper.assertTrue(ForgeRegistries.SOUND_EVENTS.containsKey(new ResourceLocation(RailScoutMod.MOD_ID, "whistle")),
+        helper.assertTrue(ForgeRegistries.SOUND_EVENTS.containsKey(ResourceLocation.fromNamespaceAndPath(RailScoutMod.MOD_ID, "whistle")),
                 "Rail Scout whistle sound event must be registered");
         helper.succeed();
     }
@@ -136,7 +137,7 @@ public final class RailScoutGameTests {
         scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
         helper.getLevel().addFreshEntity(scout);
 
-        ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
         player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
         scout.control(player, ScoutControl.NORMAL_SPEED);
         scout.control(player, ScoutControl.NORMAL_SPEED);
@@ -147,6 +148,80 @@ public final class RailScoutGameTests {
         helper.assertTrue(Math.abs(scout.speedTier().blocksPerTick() - 0.2) < 1.0e-9,
                 "new 1x speed must be 4 blocks/second, twice the old base speed");
         helper.succeed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void scoutPlacedMidRailDoesNotPlan(GameTestHelper helper) {
+        BlockPos center = helper.absolutePos(new BlockPos(6, 2, 6));
+        for (int z = -2; z <= 2; z++) {
+            BlockPos rail = center.offset(0, 0, z);
+            helper.getLevel().setBlockAndUpdate(rail.below(), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail,
+                    Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                            RailShape.NORTH_SOUTH));
+        }
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(center.getX() + 0.5, center.getY() + 0.0625, center.getZ() + 0.5);
+        scout.setInitialHeading(Direction.NORTH);
+        helper.getLevel().addFreshEntity(scout);
+        helper.runAfterDelay(40, () -> {
+            helper.assertTrue(scout.mode() == ScoutMode.STOPPED,
+                    "a Scout placed in the middle of track must remain stopped, not plan");
+            helper.assertTrue(scout.proposals().isEmpty(),
+                    "a Scout placed in the middle of track must not publish routes");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 180)
+    public static void coupledPassengerCartMovesWithoutScoutSnaps(GameTestHelper helper) {
+        BlockPos start = helper.absolutePos(new BlockPos(4, 2, 12));
+        for (int x = 0; x <= 15; x++) {
+            BlockPos rail = start.offset(x, 0, 0);
+            helper.getLevel().setBlockAndUpdate(rail.below(), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail,
+                    Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                            RailShape.EAST_WEST));
+        }
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(start.getX() + 2.5, start.getY() + 0.0625, start.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        Minecart passengerCart = new Minecart(helper.getLevel(),
+                start.getX() + 0.5, start.getY() + 0.0625, start.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(scout);
+        helper.getLevel().addFreshEntity(passengerCart);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(passengerCart.getX(), passengerCart.getY(), passengerCart.getZ());
+        player.startRiding(passengerCart, true);
+        List<Double> samples = new ArrayList<>();
+
+        helper.runAfterDelay(2, () -> {
+            helper.assertTrue(CouplingHandler.tryToCoupleCarts(null, helper.getLevel(), scout.getId(), passengerCart.getId()),
+                    "Create must couple the Rail Scout to the passenger cart");
+            scout.control(player, ScoutControl.NORMAL_SPEED);
+        });
+        helper.onEachTick(() -> {
+            if (helper.getTick() >= 3 && helper.getTick() <= 70) samples.add(scout.getX());
+        });
+        helper.runAfterDelay(75, () -> {
+            var controller = scout.getCapability(CapabilityMinecartController.MINECART_CONTROLLER_CAPABILITY).orElse(null);
+            helper.assertTrue(controller != null
+                            && (controller.isLeadingCoupling() || controller.isConnectedToCoupling()),
+                    "normal Scout traction must preserve the Create coupling");
+            helper.assertTrue(player.getVehicle() == passengerCart,
+                    "the test passenger must remain mounted in the coupled cart");
+            helper.assertTrue(samples.size() > 20 && samples.get(samples.size() - 1) > samples.get(0) + 1.0,
+                    "the coupled Scout must make forward progress");
+            for (int index = 1; index < samples.size(); index++) {
+                double delta = samples.get(index) - samples.get(index - 1);
+                helper.assertTrue(delta > -0.08 && delta < 0.65,
+                        "coupled movement must not contain backward impulses or position snaps; delta=" + delta);
+            }
+            helper.succeed();
+        });
     }
 
     @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 300)
@@ -178,8 +253,7 @@ public final class RailScoutGameTests {
         scout.inventory().setStackInSlot(2, new ItemStack(Blocks.COBBLESTONE, 16));
         helper.getLevel().addFreshEntity(scout);
 
-        ServerPlayer player = helper.makeMockServerPlayerInLevel();
-        scout.startSeenByPlayer(player);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
         AtomicReference<RouteProposal> selectedRoute = new AtomicReference<>();
         helper.startSequence()
                 .thenWaitUntil(() -> helper.assertTrue(!scout.proposals().isEmpty(),

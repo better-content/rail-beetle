@@ -1,6 +1,7 @@
 package com.bettercontent.railscout;
 
 import com.bettercontent.railscout.entity.ScoutMode;
+import com.bettercontent.railscout.entity.ScoutSpeed;
 import com.bettercontent.railscout.entity.ScoutSupplies;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
 import net.minecraft.core.BlockPos;
@@ -26,11 +27,19 @@ final class RouteGeometryTest {
 
     @Test
     void onlyMovementModesMove() {
+        assertTrue(ScoutMode.DEPARTING.moves());
         assertTrue(ScoutMode.AUTO_BUILD.moves());
         assertTrue(ScoutMode.MANUAL_FORWARD.moves());
         assertTrue(ScoutMode.MANUAL_REVERSE.moves());
         assertFalse(ScoutMode.PLANNING.moves());
         assertFalse(ScoutMode.PAUSED.moves());
+    }
+
+    @Test
+    void speedTiersUseTheNewFourBlockPerSecondBase() {
+        assertEquals(0.1, ScoutSpeed.HALF.blocksPerTick(), 1.0e-9);
+        assertEquals(0.2, ScoutSpeed.NORMAL.blocksPerTick(), 1.0e-9);
+        assertEquals(0.4, ScoutSpeed.DOUBLE.blocksPerTick(), 1.0e-9);
     }
 
     @Test

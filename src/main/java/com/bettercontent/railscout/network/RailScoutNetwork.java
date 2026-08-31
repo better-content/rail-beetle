@@ -18,12 +18,13 @@ import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
 public final class RailScoutNetwork {
-    private static final String PROTOCOL = "1";
+    private static final String PROTOCOL = "2";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(RailScoutMod.MOD_ID, "main"),
             () -> PROTOCOL, PROTOCOL::equals, PROTOCOL::equals);
@@ -32,83 +33,72 @@ public final class RailScoutNetwork {
 
     public static void register() {
         int id = 0;
-        CHANNEL.messageBuilder(ProposalSync.class, id++, NetworkDirection.PLAY_TO_CLIENT)
-                .encoder(ProposalSync::encode).decoder(ProposalSync::decode)
-                .consumerMainThread(ProposalSync::handle).add();
-        CHANNEL.messageBuilder(SelectRoute.class, id++, NetworkDirection.PLAY_TO_SERVER)
-                .encoder(SelectRoute::encode).decoder(SelectRoute::decode)
-                .consumerMainThread(SelectRoute::handle).add();
+        CHANNEL.messageBuilder(RouteSync.class, id++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(RouteSync::encode).decoder(RouteSync::decode)
+                .consumerMainThread(RouteSync::handle).add();
+        CHANNEL.messageBuilder(ContextualAction.class, id++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(ContextualAction::encode).decoder(ContextualAction::decode)
+                .consumerMainThread(ContextualAction::handle).add();
         CHANNEL.messageBuilder(Control.class, id, NetworkDirection.PLAY_TO_SERVER)
                 .encoder(Control::encode).decoder(Control::decode)
                 .consumerMainThread(Control::handle).add();
     }
 
-    public static void syncProposals(RailScoutEntity scout, List<RouteProposal> proposals) {
-        CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> scout), new ProposalSync(scout.getId(), proposals));
+    public static void syncRoutes(RailScoutEntity scout, List<RouteProposal> proposals, @Nullable RouteProposal activeRoute) {
+        CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> scout),
+                new RouteSync(scout.getId(), proposals, activeRoute));
     }
 
-    public static void selectRoute(int entityId, long generation, int routeId) {
-        CHANNEL.sendToServer(new SelectRoute(entityId, generation, routeId));
+    public static void syncRoutesTo(ServerPlayer player, RailScoutEntity scout,
+                                    List<RouteProposal> proposals, @Nullable RouteProposal activeRoute) {
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new RouteSync(scout.getId(), proposals, activeRoute));
+    }
+
+    public static void contextualAction(int entityId, long generation, int routeId) {
+        CHANNEL.sendToServer(new ContextualAction(entityId, generation, routeId));
     }
 
     public static void control(int entityId, ScoutControl control) {
         CHANNEL.sendToServer(new Control(entityId, control));
     }
 
-    public record ProposalSync(int entityId, List<RouteProposal> proposals) {
-        private static void encode(ProposalSync packet, FriendlyByteBuf buffer) {
+    public record RouteSync(int entityId, List<RouteProposal> proposals, @Nullable RouteProposal activeRoute) {
+        private static void encode(RouteSync packet, FriendlyByteBuf buffer) {
             buffer.writeVarInt(packet.entityId);
-            buffer.writeCollection(packet.proposals, (out, proposal) -> {
-                out.writeVarInt(proposal.id());
-                out.writeLong(proposal.generation());
-                out.writeBlockPos(proposal.endpoint());
-                out.writeCollection(proposal.steps(), (stepOut, step) -> {
-                    stepOut.writeBlockPos(step.railPos());
-                    stepOut.writeEnum(step.shape());
-                    stepOut.writeBoolean(step.supportPos() != null);
-                    if (step.supportPos() != null) stepOut.writeBlockPos(step.supportPos());
-                });
-            });
+            buffer.writeCollection(packet.proposals, RailScoutNetwork::writeRoute);
+            buffer.writeBoolean(packet.activeRoute != null);
+            if (packet.activeRoute != null) writeRoute(buffer, packet.activeRoute);
         }
 
-        private static ProposalSync decode(FriendlyByteBuf buffer) {
+        private static RouteSync decode(FriendlyByteBuf buffer) {
             int entityId = buffer.readVarInt();
-            List<RouteProposal> proposals = buffer.readList(in -> {
-                int id = in.readVarInt();
-                long generation = in.readLong();
-                BlockPos endpoint = in.readBlockPos();
-                List<RouteStep> steps = in.readList(stepIn -> {
-                    BlockPos railPos = stepIn.readBlockPos();
-                    RailShape shape = stepIn.readEnum(RailShape.class);
-                    BlockPos support = stepIn.readBoolean() ? stepIn.readBlockPos() : null;
-                    return new RouteStep(railPos, shape, support);
-                });
-                return new RouteProposal(id, generation, endpoint, steps);
-            });
-            return new ProposalSync(entityId, proposals);
+            List<RouteProposal> proposals = buffer.readList(RailScoutNetwork::readRoute);
+            RouteProposal active = buffer.readBoolean() ? readRoute(buffer) : null;
+            return new RouteSync(entityId, proposals, active);
         }
 
-        private static void handle(ProposalSync packet, Supplier<NetworkEvent.Context> context) {
-            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> ClientRouteStore.receive(packet.entityId, packet.proposals));
+        private static void handle(RouteSync packet, Supplier<NetworkEvent.Context> context) {
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> () -> ClientRouteStore.receive(packet.entityId, packet.proposals, packet.activeRoute));
             context.get().setPacketHandled(true);
         }
     }
 
-    public record SelectRoute(int entityId, long generation, int routeId) {
-        private static void encode(SelectRoute packet, FriendlyByteBuf buffer) {
+    public record ContextualAction(int entityId, long generation, int routeId) {
+        private static void encode(ContextualAction packet, FriendlyByteBuf buffer) {
             buffer.writeVarInt(packet.entityId);
             buffer.writeLong(packet.generation);
             buffer.writeVarInt(packet.routeId);
         }
 
-        private static SelectRoute decode(FriendlyByteBuf buffer) {
-            return new SelectRoute(buffer.readVarInt(), buffer.readLong(), buffer.readVarInt());
+        private static ContextualAction decode(FriendlyByteBuf buffer) {
+            return new ContextualAction(buffer.readVarInt(), buffer.readLong(), buffer.readVarInt());
         }
 
-        private static void handle(SelectRoute packet, Supplier<NetworkEvent.Context> context) {
+        private static void handle(ContextualAction packet, Supplier<NetworkEvent.Context> context) {
             ServerPlayer player = context.get().getSender();
             if (player != null && player.level().getEntity(packet.entityId) instanceof RailScoutEntity scout) {
-                scout.selectRoute(player, packet.generation, packet.routeId);
+                scout.contextualAction(player, packet.generation, packet.routeId);
             }
             context.get().setPacketHandled(true);
         }
@@ -131,5 +121,34 @@ public final class RailScoutNetwork {
             }
             context.get().setPacketHandled(true);
         }
+    }
+
+    private static void writeRoute(FriendlyByteBuf out, RouteProposal route) {
+        out.writeVarInt(route.id());
+        out.writeLong(route.generation());
+        out.writeBlockPos(route.origin());
+        out.writeEnum(route.originHeading());
+        out.writeBlockPos(route.endpoint());
+        out.writeCollection(route.steps(), (stepOut, step) -> {
+            stepOut.writeBlockPos(step.railPos());
+            stepOut.writeEnum(step.shape());
+            stepOut.writeBoolean(step.supportPos() != null);
+            if (step.supportPos() != null) stepOut.writeBlockPos(step.supportPos());
+        });
+    }
+
+    private static RouteProposal readRoute(FriendlyByteBuf in) {
+        int id = in.readVarInt();
+        long generation = in.readLong();
+        BlockPos origin = in.readBlockPos();
+        net.minecraft.core.Direction originHeading = in.readEnum(net.minecraft.core.Direction.class);
+        BlockPos endpoint = in.readBlockPos();
+        List<RouteStep> steps = in.readCollection(ArrayList::new, stepIn -> {
+            BlockPos railPos = stepIn.readBlockPos();
+            RailShape shape = stepIn.readEnum(RailShape.class);
+            BlockPos support = stepIn.readBoolean() ? stepIn.readBlockPos() : null;
+            return new RouteStep(railPos, shape, support);
+        });
+        return new RouteProposal(id, generation, origin, originHeading, endpoint, steps);
     }
 }

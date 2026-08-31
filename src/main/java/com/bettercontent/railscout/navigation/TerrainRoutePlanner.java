@@ -57,7 +57,7 @@ public final class TerrainRoutePlanner {
             while (budget-- > 0 && !frontier.isEmpty() && examined < DEFAULT_NODE_CAP) {
                 Node current = frontier.removeFirst();
                 examined++;
-                if (current.depth > 0) {
+                if (current.depth > 0 && current.supportPos == null) {
                     endpoints.putIfAbsent(current.pos, current);
                 }
                 if (current.depth >= railCap) {
@@ -74,6 +74,7 @@ public final class TerrainRoutePlanner {
                         BlockPos next = current.pos.relative(direction).offset(0, dy, 0);
                         Placement placement = inspect(next);
                         if (placement == null
+                                || !isolatedBridgeAllowed(current, direction, dy, next, placement)
                                 || !geometryAllowed(current, direction, dy)
                                 || !adjacencyAllowed(current, next)) {
                             continue;
@@ -134,6 +135,35 @@ public final class TerrainRoutePlanner {
                 }
             }
             return true;
+        }
+
+        private boolean isolatedBridgeAllowed(
+                Node current,
+                Direction direction,
+                int dy,
+                BlockPos candidate,
+                Placement placement
+        ) {
+            if (current.supportPos != null) {
+                return direction == current.incoming && dy == 0 && placement.supportPos == null;
+            }
+            if (placement.supportPos == null) {
+                if (dy != 0 && direction == current.incoming) {
+                    BlockPos levelCandidate = current.pos.relative(direction);
+                    Placement levelPlacement = inspect(levelCandidate);
+                    Placement levelLanding = inspect(levelCandidate.relative(direction));
+                    if (levelPlacement != null && levelPlacement.supportPos != null
+                            && levelLanding != null && levelLanding.supportPos == null) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            if (direction != current.incoming || dy != 0) {
+                return false;
+            }
+            Placement landing = inspect(candidate.relative(direction));
+            return landing != null && landing.supportPos == null;
         }
 
         private boolean adjacencyAllowed(Node current, BlockPos candidate) {
@@ -265,6 +295,16 @@ public final class TerrainRoutePlanner {
                 }
             }
             BlockPos next = index + 1 < steps.size() ? steps.get(index + 1).railPos() : null;
+            if (step.supportPos() != null) {
+                if (!step.supportPos().equals(current.below())
+                        || dy != 0
+                        || next == null
+                        || next.getY() != current.getY()
+                        || horizontalDirection(current, next) != outgoing
+                        || steps.get(index + 1).supportPos() != null) {
+                    return false;
+                }
+            }
             if (step.shape() != shapeFor(previous, current, next)) {
                 return false;
             }
@@ -322,7 +362,8 @@ public final class TerrainRoutePlanner {
     @Nullable
     private static Placement inspectPlacement(Level level, BlockPos railPos) {
         BlockPos above = railPos.above();
-        if (!level.isLoaded(railPos) || !level.isLoaded(above) || !level.isLoaded(railPos.below(2))) {
+        BlockPos floor = railPos.below();
+        if (!level.isLoaded(railPos) || !level.isLoaded(above) || !level.isLoaded(floor)) {
             return null;
         }
         BlockState railSpace = level.getBlockState(railPos);
@@ -332,19 +373,14 @@ public final class TerrainRoutePlanner {
                 || !headSpace.getFluidState().isEmpty()) {
             return null;
         }
-        BlockPos floor = railPos.below();
         BlockState floorState = level.getBlockState(floor);
         if (floorState.getFluidState().isEmpty()
                 && floorState.isFaceSturdy(level, floor, Direction.UP)
                 && !(floorState.getBlock() instanceof BaseRailBlock)) {
             return new Placement(null);
         }
-        BlockPos lowerFloor = floor.below();
-        BlockState lowerState = level.getBlockState(lowerFloor);
         if (floorState.isAir()
-                && floorState.getFluidState().isEmpty()
-                && lowerState.getFluidState().isEmpty()
-                && lowerState.isFaceSturdy(level, lowerFloor, Direction.UP)) {
+                && floorState.getFluidState().isEmpty()) {
             return new Placement(floor.immutable());
         }
         return null;

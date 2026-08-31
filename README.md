@@ -24,14 +24,15 @@ otherwise.
 - Drive at reverse `0.5`, `0.5x` (`2` blocks/second), `1x` (`4` blocks/second),
   or `2x` (`8` blocks/second). Normal use does not require the GUI.
 - The Scout automatically applies its hand brake between automatic phases and
-  on slopes. Movement uses bounded acceleration so a Create-coupled passenger
-  cart follows without position snapping or jitter from Scout-side corrections.
+  on slopes. Its `0.4` blocks/tick² traction is shared across a Create-coupled
+  consist so trailing carts keep climbing without pulling the Scout backward.
 - Mobs cannot board or shove the Scout. It uses powered-cart collision priority
   against ordinary minecarts so incidental impacts do not reverse its command.
 - The default route cap is 64 rails and can be changed in the server config.
 
 The planner only traverses loaded terrain, never excavates or routes underwater,
-and can bridge a one-block-deep gap with supplied support blocks. It requires
+and bridges an isolated one-column gap at rail height with one supplied support
+block, regardless of the gap's depth. It requires
 two straight rails between 90-degree turns and never places a route immediately
 beside unrelated existing rails. It accepts vanilla/Forge rail tags plus Rail
 Scout's explicit compatibility tag and rejects stale or changed routes before

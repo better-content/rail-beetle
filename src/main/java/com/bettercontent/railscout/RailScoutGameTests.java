@@ -3,6 +3,7 @@ package com.bettercontent.railscout;
 import com.bettercontent.railscout.entity.RailScoutEntity;
 import com.bettercontent.railscout.entity.ScoutMode;
 import com.bettercontent.railscout.navigation.RouteProposal;
+import com.bettercontent.railscout.navigation.RouteStep;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
 import com.bettercontent.railscout.network.ScoutControl;
 import com.simibubi.create.content.contraptions.minecart.capability.CapabilityMinecartController;
@@ -16,6 +17,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.vehicle.Minecart;
+import net.minecraft.world.level.block.BaseRailBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.RailShape;
 import net.minecraftforge.fml.ModList;
@@ -298,7 +300,7 @@ public final class RailScoutGameTests {
     }
 
     @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 180)
-    public static void forwardRecoversFromRollbackAndClimbsWithoutFlippingLamp(GameTestHelper helper) {
+    public static void forwardRejectsRollbackAndClimbsWithoutFlippingLamp(GameTestHelper helper) {
         BlockPos foot = helper.absolutePos(new BlockPos(4, 2, 6));
         placeEastHill(helper, foot, 7);
         RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
@@ -321,7 +323,7 @@ public final class RailScoutGameTests {
                     "rollback must not redefine Forward or flip the amber lamp; pos=" + scout.position());
         });
         helper.runAfterDelay(120, () -> {
-            helper.assertTrue(crossedBackward.get(), "test impulse must carry the Scout across a rail boundary");
+            helper.assertTrue(!crossedBackward.get(), "0.4 acceleration must reject the rollback before a rail boundary");
             helper.assertTrue(scout.getX() > startX + 1.0,
                     "Forward must recover from rollback and climb east; pos=" + scout.position());
             helper.assertTrue(scout.getY() > foot.getY() + 0.7,
@@ -331,10 +333,10 @@ public final class RailScoutGameTests {
     }
 
     @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 180)
-    public static void coupledPassengerCartClimbsSlopeWithoutSnaps(GameTestHelper helper) {
+    public static void coupledCartsClimbSustainedSlopeWithoutRollback(GameTestHelper helper) {
         BlockPos foot = helper.absolutePos(new BlockPos(6, 2, 16));
-        for (int x = -2; x < 0; x++) placeEastWestRail(helper, foot.offset(x, 0, 0));
-        placeEastHill(helper, foot, 7);
+        for (int x = -4; x < 0; x++) placeEastWestRail(helper, foot.offset(x, 0, 0));
+        placeSustainedEastHill(helper, foot, 3, 9);
         RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
         helper.assertTrue(scout != null, "Scout entity type must create");
         scout.setPos(foot.getX() + 0.5, foot.getY() + 0.0625, foot.getZ() + 0.5);
@@ -342,8 +344,11 @@ public final class RailScoutGameTests {
         scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
         Minecart passengerCart = new Minecart(helper.getLevel(),
                 foot.getX() - 1.5, foot.getY() + 0.0625, foot.getZ() + 0.5);
+        Minecart cargoCart = new Minecart(helper.getLevel(),
+                foot.getX() - 3.5, foot.getY() + 0.0625, foot.getZ() + 0.5);
         helper.getLevel().addFreshEntity(scout);
         helper.getLevel().addFreshEntity(passengerCart);
+        helper.getLevel().addFreshEntity(cargoCart);
         net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
         player.setPos(passengerCart.getX(), passengerCart.getY(), passengerCart.getZ());
         player.startRiding(passengerCart, true);
@@ -352,7 +357,9 @@ public final class RailScoutGameTests {
         helper.runAfterDelay(2, () -> {
             helper.assertTrue(CouplingHandler.tryToCoupleCarts(null, helper.getLevel(), scout.getId(), passengerCart.getId()),
                     "Create must couple the Rail Scout to the passenger cart");
-            scout.control(player, ScoutControl.NORMAL_SPEED);
+            helper.assertTrue(CouplingHandler.tryToCoupleCarts(null, helper.getLevel(), passengerCart.getId(), cargoCart.getId()),
+                    "Create must couple the trailing cargo cart");
+            scout.control(player, ScoutControl.DOUBLE_SPEED);
         });
         helper.onEachTick(() -> {
             if (helper.getTick() >= 3 && helper.getTick() <= 100) samples.add(scout.getX());
@@ -366,12 +373,12 @@ public final class RailScoutGameTests {
                     "hill traction must preserve the Create coupling");
             helper.assertTrue(player.getVehicle() == passengerCart,
                     "the passenger must remain mounted throughout the climb");
-            helper.assertTrue(scout.getX() > foot.getX() + 3.0 && scout.getY() > foot.getY() + 0.7,
-                    "the coupled Scout must climb onto the upper railway; pos=" + scout.position());
+            helper.assertTrue(scout.getX() > foot.getX() + 5.0 && scout.getY() > foot.getY() + 2.7,
+                    "the coupled Scout must climb the sustained grade; pos=" + scout.position());
             for (int index = 1; index < samples.size(); index++) {
                 double delta = samples.get(index) - samples.get(index - 1);
-                helper.assertTrue(delta > -0.08 && delta < 0.65,
-                        "coupled hill movement must not snap or reverse; delta=" + delta);
+                helper.assertTrue(delta > -0.005 && delta < 0.65,
+                        "coupled hill movement must not roll backward or snap; delta=" + delta);
             }
             helper.succeed();
         });
@@ -479,7 +486,12 @@ public final class RailScoutGameTests {
                         "Scout must advance far enough to exercise route rollback; progress=" + scout.activeStep()))
                 .thenExecute(() -> {
                     progressBeforeRollback.set(scout.activeStep());
-                    scout.setDeltaMovement(0, 0, -0.22);
+                    RouteProposal route = scout.activeRoute();
+                    helper.assertTrue(route != null, "rollback test requires an active route");
+                    int rewindStep = Math.max(0, progressBeforeRollback.get() - 2);
+                    BlockPos previous = route.steps().get(rewindStep).railPos();
+                    scout.setPos(previous.getX() + 0.5, previous.getY() + 0.0625, previous.getZ() + 0.5);
+                    scout.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
                 })
                 .thenWaitUntil(() -> helper.assertTrue(scout.activeStep() < progressBeforeRollback.get(),
                         "route cursor must rewind when the Scout crosses onto an earlier route rail; progress="
@@ -529,8 +541,8 @@ public final class RailScoutGameTests {
                                 + ", block=" + helper.getLevel().getBlockState(scout.blockPosition())))
                 .thenExecute(() -> {
                     RouteProposal route = scout.proposals().get(0);
-                    helper.assertTrue(route.supportCount() == 1, "corridor route must plan exactly one shallow support");
                     selectedRoute.set(route);
+                    helper.assertTrue(route.supportCount() == 1, "corridor route must plan exactly one shallow support");
                     Vec3Holder target = new Vec3Holder(
                             route.steps().get(0).railPos().getX() + 0.5,
                             route.steps().get(0).railPos().getY() + 0.2,
@@ -544,8 +556,12 @@ public final class RailScoutGameTests {
                 })
                 .thenWaitUntil(() -> {
                     RouteProposal route = selectedRoute.get();
+                    helper.assertTrue(route != null, "a shallow-gap route must be selected before placement checks");
                     var supportedStep = route.steps().stream().filter(step -> step.supportPos() != null).findFirst().orElseThrow();
                     BlockPos supportedRail = supportedStep.railPos();
+                    helper.assertTrue(supportedRail.getY() == origin.getY()
+                                    && supportedStep.shape() == RailShape.NORTH_SOUTH,
+                            "one-column depression must be paved level instead of using slopes");
                     helper.assertTrue(helper.getLevel().getBlockState(supportedRail).getBlock() instanceof net.minecraft.world.level.block.BaseRailBlock,
                             "Scout must place rail over the shallow gap; mode=" + scout.mode()
                                     + ", pos=" + scout.position() + ", progress=" + scout.activeStep()
@@ -559,6 +575,82 @@ public final class RailScoutGameTests {
                     helper.assertTrue(scout.fuelTicks() > 0, "Scout must load furnace fuel while moving");
                 })
                 .thenSucceed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 300)
+    public static void scoutBuildsLevelBridgeOverDeepSingleColumnGap(GameTestHelper helper) {
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 4, 4));
+        prepareSouthCorridor(helper, origin, 7);
+        BlockPos gapRail = origin.south(3);
+        helper.getLevel().setBlockAndUpdate(gapRail.below(), Blocks.AIR.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(gapRail.below(2), Blocks.AIR.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(gapRail.below(3), Blocks.AIR.defaultBlockState());
+
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(origin.getX() + 0.5, origin.getY() + 0.0625, origin.getZ() + 0.5);
+        scout.setInitialHeading(Direction.SOUTH);
+        scout.inventory().setStackInSlot(0, new ItemStack(Blocks.RAIL, 16));
+        scout.inventory().setStackInSlot(1, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        scout.inventory().setStackInSlot(2, new ItemStack(Blocks.COBBLESTONE, 16));
+        helper.getLevel().addFreshEntity(scout);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        AtomicReference<RouteProposal> selectedRoute = new AtomicReference<>();
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(!scout.proposals().isEmpty(),
+                        "Scout must plan through a deep single-column gap"))
+                .thenExecute(() -> {
+                    RouteProposal route = scout.proposals().get(0);
+                    RouteStep supported = route.steps().stream()
+                            .filter(step -> step.supportPos() != null)
+                            .findFirst().orElseThrow();
+                    helper.assertTrue(supported.railPos().equals(gapRail),
+                            "deep gap must use its missing column as the supported bridge step");
+                    helper.assertTrue(supported.supportPos().equals(gapRail.below()),
+                            "deep bridge must place exactly one floating support below the rail");
+                    helper.assertTrue(supported.shape() == RailShape.NORTH_SOUTH,
+                            "deep single-column bridge must remain level and straight");
+                    selectedRoute.set(route);
+                    player.setPos(scout.getX(), scout.getY() + 1.0, scout.getZ() - 2.0);
+                    player.lookAt(EntityAnchorArgument.Anchor.EYES,
+                            new net.minecraft.world.phys.Vec3(route.steps().get(0).railPos().getX() + 0.5,
+                                    route.steps().get(0).railPos().getY() + 0.2,
+                                    route.steps().get(0).railPos().getZ() + 0.5));
+                    scout.selectRoute(player, route.generation(), route.id());
+                })
+                .thenWaitUntil(() -> {
+                    RouteStep supported = selectedRoute.get().steps().stream()
+                            .filter(step -> step.supportPos() != null)
+                            .findFirst().orElseThrow();
+                    helper.assertTrue(BaseRailBlock.isRail(helper.getLevel().getBlockState(supported.railPos())),
+                            "Scout must place rail over the deep gap");
+                    helper.assertTrue(helper.getLevel().getBlockState(supported.supportPos()).is(Blocks.COBBLESTONE),
+                            "Scout must pave the deep gap with one supplied support block");
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void plannerDoesNotChainSupportsAcrossTwoColumnGap(GameTestHelper helper) {
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 4, 4));
+        prepareSouthCorridor(helper, origin, 7);
+        for (int z = 3; z <= 4; z++) {
+            BlockPos gapRail = origin.south(z);
+            helper.getLevel().setBlockAndUpdate(gapRail.below(), Blocks.AIR.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(gapRail.below(2), Blocks.AIR.defaultBlockState());
+        }
+
+        TerrainRoutePlanner.Session session = TerrainRoutePlanner.begin(helper.getLevel(), origin, Direction.SOUTH, 7, 99L);
+        while (!session.advance(4_096)) {
+            // Bounded deterministic search; finish synchronously inside the test.
+        }
+        helper.assertTrue(!session.proposals().isEmpty(), "planner must retain reachable routes before the gap");
+        for (RouteProposal route : session.proposals()) {
+            helper.assertTrue(route.steps().stream().noneMatch(step -> step.railPos().getZ() >= origin.getZ() + 3),
+                    "planner must not cross a two-column gap with chained floating supports");
+        }
+        helper.succeed();
     }
 
     private static void prepareSingleExit(GameTestHelper helper, BlockPos origin) {
@@ -584,6 +676,17 @@ public final class RailScoutGameTests {
                 Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
                         RailShape.ASCENDING_EAST));
         for (int x = 2; x <= length; x++) placeEastWestRail(helper, foot.offset(x, 1, 0));
+    }
+
+    private static void placeSustainedEastHill(GameTestHelper helper, BlockPos foot, int rises, int length) {
+        for (int x = 0; x < rises; x++) {
+            BlockPos slope = foot.offset(x, x, 0);
+            helper.getLevel().setBlockAndUpdate(slope.below(), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(slope,
+                    Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                            RailShape.ASCENDING_EAST));
+        }
+        for (int x = rises; x <= length; x++) placeEastWestRail(helper, foot.offset(x, rises, 0));
     }
 
     private static void placeEastWestRail(GameTestHelper helper, BlockPos rail) {

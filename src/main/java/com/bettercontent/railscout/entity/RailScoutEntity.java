@@ -67,7 +67,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     private static final int G_COOLDOWN_TICKS = 20;
     private static final int DEPARTURE_TICKS = 60;
     private static final double REVERSE_SPEED = 0.5 / 20.0;
-    private static final double ACCELERATION = 0.01;
+    private static final double ACCELERATION = 0.4;
     private static final double SERVICE_DECELERATION = 0.02;
     private static final double MAX_RAIL_SPEED = 8.0 / 20.0;
     private static final double AIM_TAN = 0.03492076949;
@@ -354,6 +354,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         setCurrentCartSpeedCapOnRail((float) MAX_RAIL_SPEED);
         setDeltaMovement(tangent.x * (along + change) + perpendicularX * 0.5,
                 motion.y, tangent.z * (along + change) + perpendicularZ * 0.5);
+        CreateCompat.applyConsistTraction(this, direction, targetSpeed, ACCELERATION);
         return Math.abs(along + change) > 1.0e-4;
     }
 

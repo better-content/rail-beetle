@@ -11,6 +11,8 @@ public final class RailScoutTags {
             Registries.ITEM, new ResourceLocation(RailScoutMod.MOD_ID, "usable_rails"));
     public static final TagKey<Block> USABLE_RAIL_BLOCKS = TagKey.create(
             Registries.BLOCK, new ResourceLocation(RailScoutMod.MOD_ID, "usable_rails"));
+    public static final TagKey<Block> CLEARABLE_OBSTRUCTIONS = TagKey.create(
+            Registries.BLOCK, new ResourceLocation(RailScoutMod.MOD_ID, "clearable_obstructions"));
     public static final TagKey<Item> FORGE_RAILS = TagKey.create(
             Registries.ITEM, new ResourceLocation("forge", "rails"));
     public static final TagKey<Block> FORGE_RAIL_BLOCKS = TagKey.create(

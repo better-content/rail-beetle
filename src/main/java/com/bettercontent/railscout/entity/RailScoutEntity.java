@@ -6,6 +6,7 @@ import com.bettercontent.railscout.compat.CreateCompat;
 import com.bettercontent.railscout.menu.RailScoutMenu;
 import com.bettercontent.railscout.navigation.RouteProposal;
 import com.bettercontent.railscout.navigation.RouteStep;
+import com.bettercontent.railscout.navigation.RouteObstructions;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
 import com.bettercontent.railscout.network.RailScoutNetwork;
 import com.bettercontent.railscout.network.ScoutControl;
@@ -434,7 +435,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         BlockState existing = level().getBlockState(step.railPos());
         if (existing.getBlock() instanceof BaseRailBlock) {
             RailShape actual = railShape(existing, step.railPos());
-            if (actual == step.shape()) return true;
+            if (actual == step.shape()) return clearRouteObstruction(step.railPos().above());
             if (!placedRouteRails.contains(step.railPos())) {
                 invalidateRoute();
                 return false;
@@ -444,7 +445,8 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
                 invalidateRoute();
                 return false;
             }
-            return level().setBlock(step.railPos(), existing.setValue(rail.getShapeProperty(), step.shape()), 3);
+            return level().setBlock(step.railPos(), existing.setValue(rail.getShapeProperty(), step.shape()), 3)
+                    && clearRouteObstruction(step.railPos().above());
         }
         if (!TerrainRoutePlanner.isRouteStepStillValid(level(), activeRoute, stepIndex)) {
             invalidateRoute();
@@ -459,6 +461,12 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         BlockItem supportItem = needsSupport ? ScoutSupplies.takeSupport(inventory) : null;
         if (railItem == null || (needsSupport && supportItem == null)) {
             pause();
+            return false;
+        }
+        if (!clearRouteObstruction(step.railPos()) || !clearRouteObstruction(step.railPos().above())) {
+            returnItem(new ItemStack(railItem));
+            if (supportItem != null) returnItem(new ItemStack(supportItem));
+            invalidateRoute();
             return false;
         }
         if (needsSupport && !level().setBlock(step.supportPos(), supportItem.getBlock().defaultBlockState(), 3)) {
@@ -478,6 +486,13 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         }
         placedRouteRails.add(step.railPos().immutable());
         return true;
+    }
+
+    private boolean clearRouteObstruction(BlockPos pos) {
+        BlockState state = level().getBlockState(pos);
+        if (state.isAir()) return true;
+        if (!RouteObstructions.isClearable(state)) return false;
+        return level().destroyBlock(pos, true, this, 512) || level().getBlockState(pos).isAir();
     }
 
     public void contextualAction(ServerPlayer player, long generation, int routeId) {

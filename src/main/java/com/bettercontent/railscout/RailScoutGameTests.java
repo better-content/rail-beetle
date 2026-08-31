@@ -3,6 +3,7 @@ package com.bettercontent.railscout;
 import com.bettercontent.railscout.entity.RailScoutEntity;
 import com.bettercontent.railscout.entity.ScoutMode;
 import com.bettercontent.railscout.navigation.RouteProposal;
+import com.bettercontent.railscout.navigation.RouteObstructions;
 import com.bettercontent.railscout.navigation.RouteStep;
 import com.bettercontent.railscout.navigation.TerrainRoutePlanner;
 import com.bettercontent.railscout.network.ScoutControl;
@@ -651,6 +652,104 @@ public final class RailScoutGameTests {
                     "planner must not cross a two-column gap with chained floating supports");
         }
         helper.succeed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 300)
+    public static void scoutClearsSoftRouteObstructionsWithDrops(GameTestHelper helper) {
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 3, 4));
+        prepareSouthCorridor(helper, origin, 8);
+        BlockPos grass = origin.south(1);
+        BlockPos snow = origin.south(2);
+        BlockPos leaves = origin.south(3);
+        BlockPos headLeaves = origin.south(4).above();
+        BlockPos flowerRelative = new BlockPos(4, 3, 9);
+        BlockPos flower = helper.absolutePos(flowerRelative);
+        helper.getLevel().setBlockAndUpdate(grass.below(), Blocks.DIRT.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(grass, Blocks.GRASS.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(snow, Blocks.SNOW.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(leaves, Blocks.OAK_LEAVES.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(headLeaves, Blocks.OAK_LEAVES.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(flower.below(), Blocks.DIRT.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(flower, Blocks.DANDELION.defaultBlockState());
+
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(origin.getX() + 0.5, origin.getY() + 0.0625, origin.getZ() + 0.5);
+        scout.setInitialHeading(Direction.SOUTH);
+        scout.inventory().setStackInSlot(0, new ItemStack(Blocks.RAIL, 20));
+        scout.inventory().setStackInSlot(1, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        helper.getLevel().addFreshEntity(scout);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(!scout.proposals().isEmpty(),
+                        "planner must route through tagged dry soft obstructions"))
+                .thenExecute(() -> {
+                    RouteProposal route = scout.proposals().get(0);
+                    helper.assertTrue(route.steps().stream().anyMatch(step -> step.railPos().equals(flower)),
+                            "soft-obstruction route must continue beyond all test vegetation");
+                    BlockPos first = route.steps().get(0).railPos();
+                    player.setPos(scout.getX(), scout.getY() + 1.0, scout.getZ() - 2.0);
+                    player.lookAt(EntityAnchorArgument.Anchor.EYES,
+                            new net.minecraft.world.phys.Vec3(first.getX() + 0.5, first.getY() + 0.2, first.getZ() + 0.5));
+                    scout.selectRoute(player, route.generation(), route.id());
+                    helper.assertTrue(scout.mode() == ScoutMode.DEPARTING,
+                            "valid soft-obstruction route must begin departure");
+                })
+                .thenWaitUntil(() -> {
+                    for (BlockPos rail : List.of(grass, snow, leaves, flower)) {
+                        helper.assertTrue(BaseRailBlock.isRail(helper.getLevel().getBlockState(rail)),
+                                "Scout must clear the obstruction and place rail at " + rail);
+                    }
+                    helper.assertTrue(helper.getLevel().getBlockState(headLeaves).isAir(),
+                            "Scout must clear tagged vegetation from head space");
+                    helper.assertItemEntityPresent(net.minecraft.world.item.Items.DANDELION, flowerRelative, 3.0);
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 160)
+    public static void staleSoftRouteDoesNotBreakProtectedReplacement(GameTestHelper helper) {
+        helper.assertTrue(!RouteObstructions.isClearable(Blocks.WHEAT.defaultBlockState()),
+                "crops must remain protected");
+        helper.assertTrue(!RouteObstructions.isClearable(Blocks.OAK_LOG.defaultBlockState()),
+                "logs must remain protected");
+        helper.assertTrue(!RouteObstructions.isClearable(Blocks.STONE.defaultBlockState()),
+                "solid terrain must remain protected");
+        helper.assertTrue(!RouteObstructions.isClearable(Blocks.CHEST.defaultBlockState()),
+                "block entities must remain protected");
+        helper.assertTrue(!RouteObstructions.isClearable(Blocks.WATER.defaultBlockState()),
+                "fluid blocks must remain protected");
+
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 3, 4));
+        prepareSouthCorridor(helper, origin, 7);
+        BlockPos obstruction = origin.south(3);
+        helper.getLevel().setBlockAndUpdate(obstruction.below(), Blocks.DIRT.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(obstruction, Blocks.GRASS.defaultBlockState());
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(origin.getX() + 0.5, origin.getY() + 0.0625, origin.getZ() + 0.5);
+        scout.setInitialHeading(Direction.SOUTH);
+        helper.getLevel().addFreshEntity(scout);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(!scout.proposals().isEmpty(),
+                        "Scout must initially plan through grass"))
+                .thenExecute(() -> {
+                    RouteProposal route = scout.proposals().get(0);
+                    helper.getLevel().setBlockAndUpdate(obstruction, Blocks.STONE.defaultBlockState());
+                    BlockPos first = route.steps().get(0).railPos();
+                    player.setPos(scout.getX(), scout.getY() + 1.0, scout.getZ() - 2.0);
+                    player.lookAt(EntityAnchorArgument.Anchor.EYES,
+                            new net.minecraft.world.phys.Vec3(first.getX() + 0.5, first.getY() + 0.2, first.getZ() + 0.5));
+                    scout.selectRoute(player, route.generation(), route.id());
+                    helper.assertTrue(scout.mode() == ScoutMode.READY,
+                            "route must be rejected when soft vegetation becomes a hard block");
+                    helper.assertTrue(helper.getLevel().getBlockState(obstruction).is(Blocks.STONE),
+                            "stale-route rejection must not damage the protected replacement");
+                })
+                .thenSucceed();
     }
 
     private static void prepareSingleExit(GameTestHelper helper, BlockPos origin) {

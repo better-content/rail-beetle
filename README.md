@@ -30,9 +30,10 @@ otherwise.
   against ordinary minecarts so incidental impacts do not reverse its command.
 - The default route cap is 64 rails and can be changed in the server config.
 
-The planner only traverses loaded terrain, never excavates or routes underwater,
-and bridges an isolated one-column gap at rail height with one supplied support
-block, regardless of the gap's depth. It requires
+The planner only traverses loaded terrain, never excavates solid blocks or routes
+underwater, and clears tagged dry vegetation, leaves, and snow layers with normal
+block drops as it builds. It bridges an isolated one-column gap at rail height
+with one supplied support block, regardless of the gap's depth. It requires
 two straight rails between 90-degree turns and never places a route immediately
 beside unrelated existing rails. It accepts vanilla/Forge rail tags plus Rail
 Scout's explicit compatibility tag and rejects stale or changed routes before

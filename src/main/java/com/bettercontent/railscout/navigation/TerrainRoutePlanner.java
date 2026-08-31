@@ -368,7 +368,8 @@ public final class TerrainRoutePlanner {
         }
         BlockState railSpace = level.getBlockState(railPos);
         BlockState headSpace = level.getBlockState(above);
-        if (!railSpace.isAir() || !headSpace.isAir()
+        if (!RouteObstructions.isOpenOrClearable(railSpace)
+                || !RouteObstructions.isOpenOrClearable(headSpace)
                 || !railSpace.getFluidState().isEmpty()
                 || !headSpace.getFluidState().isEmpty()) {
             return null;

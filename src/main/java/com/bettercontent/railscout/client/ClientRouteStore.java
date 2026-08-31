@@ -2,9 +2,9 @@ package com.bettercontent.railscout.client;
 
 import com.bettercontent.railscout.navigation.RouteProposal;
 import net.minecraft.client.Minecraft;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.phys.AABB;
+import com.bettercontent.railscout.entity.RailScoutEntity;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.client.multiplayer.ClientLevel;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
@@ -12,21 +12,40 @@ import java.util.List;
 import java.util.Map;
 
 public final class ClientRouteStore {
-    private static final Map<Integer, List<RouteProposal>> ROUTES = new HashMap<>();
+    private static final double MAX_SELECTION_ANGLE = Math.toRadians(2.0);
+    private static final Map<Integer, RouteSet> ROUTES = new HashMap<>();
+    private static int lastControlledScout = -1;
+    @Nullable private static ClientLevel knownLevel;
 
     private ClientRouteStore() {}
 
     public static void receive(int entityId, List<RouteProposal> proposals) {
-        if (proposals.isEmpty()) ROUTES.remove(entityId);
-        else ROUTES.put(entityId, List.copyOf(proposals));
+        receive(entityId, proposals, null);
     }
 
-    public static Map<Integer, List<RouteProposal>> routes() {
+    public static void receive(int entityId, List<RouteProposal> proposals, @Nullable RouteProposal activeRoute) {
+        knownLevel = Minecraft.getInstance().level;
+        if (proposals.isEmpty() && activeRoute == null) ROUTES.remove(entityId);
+        else ROUTES.put(entityId, new RouteSet(List.copyOf(proposals), activeRoute));
+        if (activeRoute != null && lastControlledScout < 0) lastControlledScout = entityId;
+    }
+
+    public static Map<Integer, RouteSet> routes() {
         Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level != knownLevel) {
+            ROUTES.clear();
+            lastControlledScout = -1;
+            knownLevel = minecraft.level;
+        }
         if (minecraft.level != null) {
             ROUTES.keySet().removeIf(id -> minecraft.level.getEntity(id) == null);
+            if (!ROUTES.containsKey(lastControlledScout)) lastControlledScout = -1;
         }
         return Map.copyOf(ROUTES);
+    }
+
+    public static void rememberControlled(int entityId) {
+        lastControlledScout = entityId;
     }
 
     @Nullable
@@ -34,28 +53,96 @@ public final class ClientRouteStore {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null || minecraft.level == null) return null;
         Vec3 eye = minecraft.player.getEyePosition();
-        Vec3 end = eye.add(minecraft.player.getLookAngle().scale(96.0));
+        Vec3 look = minecraft.player.getLookAngle().normalize();
         Selection best = null;
-        double bestDistance = Double.MAX_VALUE;
-        for (Map.Entry<Integer, List<RouteProposal>> entry : routes().entrySet()) {
-            Entity scout = minecraft.level.getEntity(entry.getKey());
-            if (scout == null || minecraft.player.distanceToSqr(scout) > 256.0) continue;
-            for (RouteProposal route : entry.getValue()) {
+        double bestAngle = MAX_SELECTION_ANGLE;
+        double bestAlongRay = Double.MAX_VALUE;
+        for (Map.Entry<Integer, RouteSet> entry : routes().entrySet()) {
+            var scout = minecraft.level.getEntity(entry.getKey());
+            if (!(scout instanceof RailScoutEntity)) continue;
+            for (RouteProposal route : entry.getValue().proposals()) {
+                Vec3 previous = Vec3.atLowerCornerOf(route.origin()).add(0.5, 0.2, 0.5);
                 for (var step : route.steps()) {
-                    Vec3 center = Vec3.atLowerCornerOf(step.railPos()).add(0.5, 0.18, 0.5);
-                    var hit = new AABB(center, center).inflate(0.8).clip(eye, end);
-                    if (hit.isPresent()) {
-                        double distance = eye.distanceToSqr(hit.get());
-                        if (distance < bestDistance) {
-                            bestDistance = distance;
-                            best = new Selection(entry.getKey(), route);
-                        }
+                    Vec3 current = Vec3.atLowerCornerOf(step.railPos()).add(0.5, 0.2, 0.5);
+                    RayDistance distance = distanceToLookRay(eye, look, previous, current);
+                    if (distance != null && (distance.angle() < bestAngle
+                            || distance.angle() == bestAngle && distance.alongRay() < bestAlongRay)) {
+                        bestAngle = distance.angle();
+                        bestAlongRay = distance.alongRay();
+                        best = new Selection(entry.getKey(), route);
                     }
+                    previous = current;
                 }
             }
         }
         return best;
     }
 
+    @Nullable
+    public static ActionTarget contextualTarget() {
+        Selection selected = crosshairSelection();
+        if (selected != null) return new ActionTarget(selected.entityId(), Action.FOLLOW, selected.route());
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null) return null;
+        RailScoutEntity fallback = scoutWithActiveRoute(lastControlledScout);
+        if (fallback == null) {
+            for (Map.Entry<Integer, RouteSet> entry : routes().entrySet()) {
+                if (entry.getValue().activeRoute() != null) {
+                    RailScoutEntity candidate = scoutWithActiveRoute(entry.getKey());
+                    if (candidate != null) fallback = candidate;
+                }
+            }
+        }
+        if (fallback == null) return null;
+        Action action = fallback.mode().moves() ? Action.STOP : Action.CLEAR;
+        return new ActionTarget(fallback.getId(), action, null);
+    }
+
+    @Nullable
+    private static RailScoutEntity scoutWithActiveRoute(int entityId) {
+        Minecraft minecraft = Minecraft.getInstance();
+        RouteSet set = ROUTES.get(entityId);
+        if (set == null || set.activeRoute() == null || minecraft.level == null) return null;
+        return minecraft.level.getEntity(entityId) instanceof RailScoutEntity scout ? scout : null;
+    }
+
+    @Nullable
+    private static RayDistance distanceToLookRay(Vec3 origin, Vec3 ray, Vec3 start, Vec3 end) {
+        Vec3 segment = end.subtract(start);
+        Vec3 offset = origin.subtract(start);
+        double a = segment.lengthSqr();
+        if (a < 1.0e-8) return pointDistance(origin, ray, start);
+        double b = segment.dot(ray);
+        double c = ray.lengthSqr();
+        double d = segment.dot(offset);
+        double e = ray.dot(offset);
+        double denominator = a * c - b * b;
+        double segmentT = denominator < 1.0e-8 ? 0.0 : clamp((c * d - b * e) / denominator, 0.0, 1.0);
+        double rayT = Math.max(0.0, (b * segmentT - e) / c);
+        segmentT = clamp((d + b * rayT) / a, 0.0, 1.0);
+        rayT = Math.max(0.0, (b * segmentT - e) / c);
+        if (rayT <= 0.0) return null;
+        Vec3 onSegment = start.add(segment.scale(segmentT));
+        Vec3 onRay = origin.add(ray.scale(rayT));
+        double angle = Math.atan2(onSegment.distanceTo(onRay), rayT);
+        return angle <= MAX_SELECTION_ANGLE ? new RayDistance(angle, rayT) : null;
+    }
+
+    @Nullable
+    private static RayDistance pointDistance(Vec3 origin, Vec3 ray, Vec3 point) {
+        double along = point.subtract(origin).dot(ray);
+        if (along <= 0.0) return null;
+        double angle = Math.atan2(point.distanceTo(origin.add(ray.scale(along))), along);
+        return angle <= MAX_SELECTION_ANGLE ? new RayDistance(angle, along) : null;
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    public enum Action { FOLLOW, STOP, CLEAR }
+    public record RouteSet(List<RouteProposal> proposals, @Nullable RouteProposal activeRoute) {}
     public record Selection(int entityId, RouteProposal route) {}
+    public record ActionTarget(int entityId, Action action, @Nullable RouteProposal route) {}
+    private record RayDistance(double angle, double alongRay) {}
 }

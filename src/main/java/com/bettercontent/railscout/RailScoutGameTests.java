@@ -29,6 +29,8 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -105,6 +107,42 @@ public final class RailScoutGameTests {
         helper.assertTrue(routes.stream().allMatch(route -> route.railCount() <= 8), "every route must honor its rail cap");
         helper.assertTrue(routes.stream().map(RouteProposal::endpoint).distinct().count() == 7,
                 "proposal endpoints must be distinct");
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 300)
+    public static void plannerReachesSixtyFourRailCapDeterministically(GameTestHelper helper) {
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 2, 4));
+        prepareLongSnakeCorridor(helper, origin);
+
+        TerrainRoutePlanner.Session first = TerrainRoutePlanner.begin(
+                helper.getLevel(), origin, Direction.SOUTH, 64, 501L);
+        while (!first.advance(4_096)) {
+            Thread.onSpinWait();
+        }
+        TerrainRoutePlanner.Session second = TerrainRoutePlanner.beginSingleThreadedReference(
+                helper.getLevel(), origin, Direction.SOUTH, 64, 502L);
+        while (!second.advance(4_096)) {
+            Thread.onSpinWait();
+        }
+        TerrainRoutePlanner.Session repeated = TerrainRoutePlanner.begin(
+                helper.getLevel(), origin, Direction.SOUTH, 64, 503L);
+        while (!repeated.advance(4_096)) {
+            Thread.onSpinWait();
+        }
+
+        List<RouteProposal> firstRoutes = first.proposals();
+        List<RouteProposal> secondRoutes = second.proposals();
+        List<RouteProposal> repeatedRoutes = repeated.proposals();
+        helper.assertTrue(!firstRoutes.isEmpty(), "64-rail corridor must produce a route");
+        helper.assertTrue(firstRoutes.get(0).railCount() == 64,
+                "planner must reach the configured cap instead of stopping near the old 32k ceiling");
+        helper.assertTrue(firstRoutes.stream().map(RouteProposal::steps).toList()
+                        .equals(secondRoutes.stream().map(RouteProposal::steps).toList()),
+                "parallel planning must exactly match the single-thread reference BFS");
+        helper.assertTrue(firstRoutes.stream().map(RouteProposal::steps).toList()
+                        .equals(repeatedRoutes.stream().map(RouteProposal::steps).toList()),
+                "parallel planning must be deterministic across identical searches");
         helper.succeed();
     }
 
@@ -1006,6 +1044,34 @@ public final class RailScoutGameTests {
                         RailShape.NORTH_SOUTH));
         helper.getLevel().setBlockAndUpdate(origin.south(length), Blocks.STONE.defaultBlockState());
         helper.getLevel().setBlockAndUpdate(origin.south(length).above(), Blocks.STONE.defaultBlockState());
+    }
+
+    private static void prepareLongSnakeCorridor(GameTestHelper helper, BlockPos origin) {
+        Set<BlockPos> path = new HashSet<>();
+        BlockPos cursor = origin;
+        path.add(cursor);
+        Direction[] directions = {Direction.SOUTH, Direction.EAST, Direction.NORTH, Direction.EAST,
+                Direction.SOUTH, Direction.EAST, Direction.NORTH, Direction.EAST, Direction.SOUTH};
+        int[] lengths = {10, 3, 10, 3, 10, 3, 10, 3, 12};
+        for (int segment = 0; segment < directions.length; segment++) {
+            for (int step = 0; step < lengths[segment]; step++) {
+                cursor = cursor.relative(directions[segment]);
+                path.add(cursor);
+            }
+        }
+        for (int x = -1; x <= 13; x++) {
+            for (int z = -1; z <= 13; z++) {
+                BlockPos rail = origin.offset(x, 0, z);
+                helper.getLevel().setBlockAndUpdate(rail.below(), Blocks.STONE.defaultBlockState());
+                helper.getLevel().setBlockAndUpdate(rail,
+                        path.contains(rail) ? Blocks.AIR.defaultBlockState() : Blocks.STONE.defaultBlockState());
+                helper.getLevel().setBlockAndUpdate(rail.above(),
+                        path.contains(rail) ? Blocks.AIR.defaultBlockState() : Blocks.STONE.defaultBlockState());
+            }
+        }
+        helper.getLevel().setBlockAndUpdate(origin,
+                Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                        RailShape.NORTH_SOUTH));
     }
 
     private record Vec3Holder(double x, double y, double z) {}

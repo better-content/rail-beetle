@@ -1,5 +1,11 @@
 package com.bettercontent.railscout.navigation;
 
+import it.unimi.dsi.fastutil.longs.Long2ByteMap;
+import it.unimi.dsi.fastutil.longs.Long2ByteMaps;
+import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
@@ -16,181 +22,391 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinWorkerThread;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 
 public final class TerrainRoutePlanner {
-    public static final int DEFAULT_NODE_CAP = 32_768;
+    public static final int MINIMUM_NODE_CAP = 262_144;
+    private static final int SEARCH_THREADS = Math.max(1,
+            Math.min(8, Runtime.getRuntime().availableProcessors() - 1));
+    private static final ForkJoinPool SEARCH_POOL = new ForkJoinPool(SEARCH_THREADS, pool -> {
+        ForkJoinWorkerThread worker = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
+        worker.setName("rail-scout-route-" + worker.getPoolIndex());
+        worker.setDaemon(true);
+        return worker;
+    }, null, false);
 
     private TerrainRoutePlanner() {}
+
+    public static int nodeCapFor(int railCap) {
+        int boundedCap = Math.max(1, railCap);
+        return Math.max(MINIMUM_NODE_CAP, 32 * boundedCap * boundedCap);
+    }
+
+    static int searchThreadCount() {
+        return SEARCH_THREADS;
+    }
 
     public static Session begin(Level level, BlockPos originRail, Direction forward, int railCap, long generation) {
         if (!forward.getAxis().isHorizontal()) {
             forward = Direction.NORTH;
         }
-        return new Session(level, originRail.immutable(), forward, railCap, generation);
+        return new Session(level, originRail.immutable(), forward, railCap, generation, true);
+    }
+
+    public static Session beginSingleThreadedReference(
+            Level level, BlockPos originRail, Direction forward, int railCap, long generation
+    ) {
+        if (!forward.getAxis().isHorizontal()) forward = Direction.NORTH;
+        return new Session(level, originRail.immutable(), forward, railCap, generation, false);
     }
 
     public static final class Session {
-        private final Level level;
         private final BlockPos origin;
         private final int railCap;
         private final long generation;
         private final Direction originHeading;
-        private final ArrayDeque<Node> frontier = new ArrayDeque<>();
-        private final Set<Key> visited = new HashSet<>();
-        private final Map<BlockPos, Node> endpoints = new LinkedHashMap<>();
-        private boolean complete;
-        private int examined;
+        private final boolean parallel;
+        private final TerrainMeshBuilder meshBuilder;
+        private final AtomicBoolean cancelled = new AtomicBoolean();
+        private final AtomicBoolean previewRequested = new AtomicBoolean();
+        private final AtomicReference<SearchSnapshot> snapshot = new AtomicReference<>();
+        @Nullable private java.util.concurrent.ForkJoinTask<?> searchTask;
 
-        private Session(Level level, BlockPos origin, Direction forward, int railCap, long generation) {
-            this.level = level;
+        private Session(Level level, BlockPos origin, Direction forward, int railCap, long generation,
+                        boolean parallel) {
             this.origin = origin;
             this.railCap = Math.max(1, railCap);
             this.generation = generation;
             this.originHeading = forward;
-            Node root = new Node(origin, forward, 0, null, null, false, 0);
-            frontier.add(root);
-            visited.add(new Key(origin, forward, false, 0));
+            this.parallel = parallel;
+            this.meshBuilder = new TerrainMeshBuilder(level, origin, this.railCap);
         }
 
         public boolean advance(int nodeBudget) {
-            int budget = Math.max(1, nodeBudget);
-            while (budget-- > 0 && !frontier.isEmpty() && examined < DEFAULT_NODE_CAP) {
-                Node current = frontier.removeFirst();
-                examined++;
-                if (current.depth > 0 && current.supportPos == null) {
-                    endpoints.putIfAbsent(current.pos, current);
-                }
-                if (current.depth >= railCap) {
-                    continue;
-                }
-                for (Direction direction : Direction.Plane.HORIZONTAL) {
-                    if (current.parent == null && direction != current.incoming) {
-                        continue;
-                    }
-                    if (direction == current.incoming.getOpposite()) {
-                        continue;
-                    }
-                    for (int dy = -1; dy <= 1; dy++) {
-                        BlockPos next = current.pos.relative(direction).offset(0, dy, 0);
-                        Placement placement = inspect(next);
-                        if (placement == null
-                                || !isolatedBridgeAllowed(current, direction, dy, next, placement)
-                                || !geometryAllowed(current, direction, dy)
-                                || !adjacencyAllowed(current, next)) {
-                            continue;
-                        }
-                        boolean turn = current.incoming.getAxis() != direction.getAxis();
-                        boolean hasTurn = current.hasTurn || turn;
-                        int straightSinceTurn = turn ? 0
-                                : current.hasTurn ? Math.min(2, current.straightSinceTurn + 1) : 0;
-                        Key key = new Key(next, direction, hasTurn, straightSinceTurn);
-                        if (!visited.add(key)) {
-                            continue;
-                        }
-                        frontier.addLast(new Node(next.immutable(), direction, current.depth + 1, current,
-                                placement.supportPos, hasTurn, straightSinceTurn));
-                    }
-                }
+            if (cancelled.get()) return true;
+            if (searchTask == null) {
+                if (!meshBuilder.advance(Math.max(1, nodeBudget))) return false;
+                TerrainMesh mesh = meshBuilder.freeze();
+                searchTask = SEARCH_POOL.submit(() -> search(mesh, origin, originHeading, railCap,
+                        generation, parallel, cancelled, previewRequested, snapshot));
             }
-            complete = frontier.isEmpty() || examined >= DEFAULT_NODE_CAP;
-            return complete;
+            if (!searchTask.isDone()) return false;
+            if (!searchTask.isCancelled()) searchTask.join();
+            return true;
         }
 
         public boolean isComplete() {
-            return complete;
+            return searchTask != null && searchTask.isDone();
         }
 
         public List<RouteProposal> proposals() {
-            if (!complete) {
+            if (!isComplete()) {
                 throw new IllegalStateException("Planning is not complete");
             }
-            List<Node> diverse = RouteDiversitySelector.select(origin, endpoints.values(), node -> node.pos, 3, 7);
-            List<RouteProposal> result = new ArrayList<>(diverse.size());
-            for (int index = 0; index < diverse.size(); index++) {
-                Node endpoint = diverse.get(index);
-                List<Node> path = reconstruct(endpoint);
-                List<RouteStep> steps = new ArrayList<>(path.size());
-                for (int stepIndex = 0; stepIndex < path.size(); stepIndex++) {
-                    BlockPos previous = stepIndex == 0 ? origin : path.get(stepIndex - 1).pos;
-                    BlockPos current = path.get(stepIndex).pos;
-                    BlockPos next = stepIndex + 1 < path.size() ? path.get(stepIndex + 1).pos : null;
-                    steps.add(new RouteStep(current, shapeFor(previous, current, next), path.get(stepIndex).supportPos));
-                }
-                result.add(new RouteProposal(index, generation, origin, originHeading, endpoint.pos, steps));
-            }
-            return List.copyOf(result);
+            SearchSnapshot latest = snapshot.get();
+            return latest == null ? List.of() : latest.proposals();
         }
 
-        private boolean geometryAllowed(Node current, Direction direction, int dy) {
-            if (!turnSpacingAllowed(current.incoming, direction, current.hasTurn, current.straightSinceTurn)) {
-                return false;
-            }
-            if (dy != 0 && current.parent != null && current.incoming.getAxis() != direction.getAxis()) {
-                return false;
-            }
-            if (current.parent != null) {
-                int previousDy = current.pos.getY() - current.parent.pos.getY();
-                if (previousDy < 0 && dy > 0) {
-                    return false;
-                }
-                if (previousDy != 0 && current.incoming.getAxis() != direction.getAxis()) {
-                    return false;
-                }
-            }
-            return true;
+        @Nullable
+        public SearchSnapshot latestSnapshot() {
+            return snapshot.get();
         }
 
-        private boolean isolatedBridgeAllowed(
-                Node current,
-                Direction direction,
-                int dy,
-                BlockPos candidate,
-                Placement placement
-        ) {
-            if (current.supportPos != null) {
-                return direction == current.incoming && dy == 0 && placement.supportPos == null;
-            }
-            if (placement.supportPos == null) {
-                if (dy != 0 && levelBridgeRequired(level, current.pos, direction)) {
-                    return false;
-                }
-                return true;
-            }
-            if (direction != current.incoming || dy != 0) {
-                return false;
-            }
-            Placement landing = inspect(candidate.relative(direction));
-            return landing != null && landing.supportPos == null;
+        public void cancel() {
+            cancelled.set(true);
+            if (searchTask != null) searchTask.cancel(false);
         }
 
-        private boolean adjacencyAllowed(Node current, BlockPos candidate) {
-            for (Direction side : Direction.Plane.HORIZONTAL) {
-                BlockPos adjacentColumn = candidate.relative(side);
-                for (int dy = -1; dy <= 1; dy++) {
-                    BlockPos adjacent = adjacentColumn.offset(0, dy, 0);
-                    if (adjacent.equals(current.pos)) {
-                        continue;
-                    }
-                    if (!level.isLoaded(adjacent)) {
-                        return false;
-                    }
-                    if (BaseRailBlock.isRail(level.getBlockState(adjacent))) {
-                        return false;
-                    }
-                    for (Node ancestor = current.parent; ancestor != null; ancestor = ancestor.parent) {
-                        if (ancestor.pos.equals(adjacent)) {
-                            return false;
+        public void requestPreview() {
+            previewRequested.set(true);
+        }
+    }
+
+    public record SearchSnapshot(List<RouteProposal> proposals, int deepestCompletedLayer,
+                                 int examined, CompletionReason reason) {
+        public SearchSnapshot {
+            proposals = List.copyOf(proposals);
+        }
+
+        public boolean complete() {
+            return reason != CompletionReason.SEARCHING;
+        }
+    }
+
+    public enum CompletionReason { SEARCHING, EXHAUSTED, RAIL_CAP, NODE_LIMIT, CANCELLED }
+
+    private static final class TerrainMeshBuilder {
+        private final Level level;
+        private final BlockPos origin;
+        private final int railCap;
+        private final ArrayDeque<MeshPoint> frontier = new ArrayDeque<>();
+        private final Map<BlockPos, Integer> queuedDepth = new HashMap<>();
+        private final Map<BlockPos, Placement> placements = new HashMap<>();
+        private final Set<BlockPos> blocked = new HashSet<>();
+        private final Map<BlockPos, WorldCell> world = new HashMap<>();
+
+        private TerrainMeshBuilder(Level level, BlockPos origin, int railCap) {
+            this.level = level;
+            this.origin = origin.immutable();
+            this.railCap = railCap;
+            enqueue(this.origin, 0);
+        }
+
+        private boolean advance(int budget) {
+            while (budget-- > 0 && !frontier.isEmpty()) {
+                MeshPoint point = frontier.removeFirst();
+                sampleHalo(point.pos);
+                if (point.depth >= railCap) continue;
+                for (Direction direction : Direction.Plane.HORIZONTAL) {
+                    for (int dy = -1; dy <= 1; dy++) {
+                        BlockPos candidate = point.pos.relative(direction).offset(0, dy, 0).immutable();
+                        Placement placement = classify(candidate);
+                        if (placement == null) continue;
+                        if (placement.supportPos == null) {
+                            enqueue(candidate, point.depth + 1);
+                        } else if (dy == 0 && point.depth + 2 <= railCap) {
+                            BlockPos landing = candidate.relative(direction).immutable();
+                            Placement landingPlacement = classify(landing);
+                            if (landingPlacement != null && landingPlacement.supportPos == null) {
+                                enqueue(landing, point.depth + 2);
+                            }
                         }
                     }
                 }
             }
-            return true;
+            return frontier.isEmpty();
         }
 
         @Nullable
-        private Placement inspect(BlockPos railPos) {
-            return inspectPlacement(level, railPos);
+        private Placement classify(BlockPos pos) {
+            Placement known = placements.get(pos);
+            if (known != null) return known;
+            if (blocked.contains(pos)) return null;
+            Placement placement = inspectPlacement(level, pos);
+            sampleHalo(pos);
+            if (placement == null) blocked.add(pos);
+            else placements.put(pos, placement);
+            return placement;
         }
+
+        private void enqueue(BlockPos pos, int depth) {
+            Integer old = queuedDepth.get(pos);
+            if (old != null && old <= depth) return;
+            queuedDepth.put(pos, depth);
+            frontier.addLast(new MeshPoint(pos.immutable(), depth));
+        }
+
+        private void sampleHalo(BlockPos pos) {
+            sampleWorld(pos);
+            for (Direction side : Direction.Plane.HORIZONTAL) {
+                BlockPos column = pos.relative(side);
+                for (int dy = -1; dy <= 1; dy++) sampleWorld(column.offset(0, dy, 0));
+            }
+        }
+
+        private void sampleWorld(BlockPos pos) {
+            BlockPos immutable = pos.immutable();
+            world.computeIfAbsent(immutable, key -> level.isLoaded(key)
+                    ? new WorldCell(true, BaseRailBlock.isRail(level.getBlockState(key)))
+                    : new WorldCell(false, false));
+        }
+
+        private TerrainMesh freeze() {
+            if (!frontier.isEmpty()) throw new IllegalStateException("Terrain mesh is incomplete");
+            Long2ObjectOpenHashMap<Placement> packedPlacements = new Long2ObjectOpenHashMap<>(placements.size());
+            placements.forEach((pos, placement) -> packedPlacements.put(pos.asLong(), placement));
+            Long2ByteOpenHashMap packedWorld = new Long2ByteOpenHashMap(world.size());
+            world.forEach((pos, cell) -> packedWorld.put(pos.asLong(),
+                    (byte) (cell.loaded ? cell.rail ? 2 : 1 : 0)));
+            packedWorld.defaultReturnValue((byte) 0);
+            return new TerrainMesh(Long2ObjectMaps.unmodifiable(packedPlacements),
+                    Long2ByteMaps.unmodifiable(packedWorld));
+        }
+    }
+
+    private record TerrainMesh(Long2ObjectMap<Placement> placements, Long2ByteMap world) {
+        @Nullable Placement placement(BlockPos pos) { return placements.get(pos.asLong()); }
+        boolean loadedAndRailFree(BlockPos pos) {
+            return world.get(pos.asLong()) == 1;
+        }
+    }
+
+    private static void search(TerrainMesh mesh, BlockPos origin, Direction originHeading, int railCap,
+                               long generation, boolean parallel, AtomicBoolean cancelled,
+                               AtomicBoolean previewRequested,
+                               AtomicReference<SearchSnapshot> published) {
+        int nodeCap = nodeCapFor(railCap);
+        long sequence = 1;
+        long originHash = bloomHash(origin);
+        List<Node> frontier = List.of(new Node(origin, originHeading, 0, null, null, false, 0, 0,
+                bloomBitA(originHash), bloomBitB(originHash)));
+        Set<Key> visited = new HashSet<>();
+        visited.add(new Key(origin, originHeading, false, 0));
+        Map<BlockPos, Node> endpoints = new LinkedHashMap<>();
+        int examined = 0;
+        int completedDepth = -1;
+
+        while (!frontier.isEmpty()) {
+            if (cancelled.get()) {
+                publish(published, origin, originHeading, generation, endpoints, completedDepth,
+                        examined, CompletionReason.CANCELLED);
+                return;
+            }
+            if (examined + frontier.size() > nodeCap) {
+                publish(published, origin, originHeading, generation, endpoints, completedDepth,
+                        examined, CompletionReason.NODE_LIMIT);
+                return;
+            }
+            int depth = frontier.get(0).depth;
+            for (Node node : frontier) {
+                if (node.depth > 0 && node.supportPos == null) endpoints.putIfAbsent(node.pos, node);
+            }
+            examined += frontier.size();
+            completedDepth = depth;
+            if (depth >= railCap) {
+                publish(published, origin, originHeading, generation, endpoints, completedDepth,
+                        examined, CompletionReason.RAIL_CAP);
+                return;
+            }
+            if (previewRequested.getAndSet(false)) {
+                publish(published, origin, originHeading, generation, endpoints, completedDepth,
+                        examined, CompletionReason.SEARCHING);
+            }
+
+            final List<Node> layer = frontier;
+            IntStream parents = IntStream.range(0, layer.size());
+            if (parallel) parents = parents.parallel();
+            List<List<Candidate>> batches = parents
+                    .mapToObj(index -> expand(mesh, layer.get(index), cancelled)).toList();
+            List<Node> next = new ArrayList<>();
+            for (List<Candidate> batch : batches) {
+                for (Candidate candidate : batch) {
+                    if (!visited.add(candidate.key)) continue;
+                    long hash = bloomHash(candidate.pos);
+                    Node child = new Node(candidate.pos, candidate.direction, depth + 1, candidate.parent,
+                            candidate.supportPos, candidate.hasTurn, candidate.straightSinceTurn, sequence++,
+                            candidate.parent.ancestryBloomA | bloomBitA(hash),
+                            candidate.parent.ancestryBloomB | bloomBitB(hash));
+                    next.add(child);
+                }
+            }
+            frontier = List.copyOf(next);
+        }
+        publish(published, origin, originHeading, generation, endpoints, completedDepth,
+                examined, CompletionReason.EXHAUSTED);
+    }
+
+    private static List<Candidate> expand(TerrainMesh mesh, Node current, AtomicBoolean cancelled) {
+        if (cancelled.get()) return List.of();
+        List<Candidate> result = new ArrayList<>(8);
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            if (current.parent == null && direction != current.incoming) continue;
+            if (direction == current.incoming.getOpposite()) continue;
+            for (int dy = -1; dy <= 1; dy++) {
+                BlockPos next = current.pos.relative(direction).offset(0, dy, 0).immutable();
+                Placement placement = mesh.placement(next);
+                if (placement == null
+                        || !isolatedBridgeAllowed(mesh, current, direction, dy, next, placement)
+                        || !geometryAllowed(current, direction, dy)
+                        || !adjacencyAllowed(mesh, current, next)) continue;
+                boolean turn = current.incoming.getAxis() != direction.getAxis();
+                boolean hasTurn = current.hasTurn || turn;
+                int straight = turn ? 0 : current.hasTurn ? Math.min(2, current.straightSinceTurn + 1) : 0;
+                result.add(new Candidate(next, direction, current, placement.supportPos, hasTurn, straight,
+                        new Key(next, direction, hasTurn, straight)));
+            }
+        }
+        return result;
+    }
+
+    private static boolean geometryAllowed(Node current, Direction direction, int dy) {
+        if (!turnSpacingAllowed(current.incoming, direction, current.hasTurn, current.straightSinceTurn)) return false;
+        if (dy != 0 && current.parent != null && current.incoming.getAxis() != direction.getAxis()) return false;
+        if (current.parent != null) {
+            int previousDy = current.pos.getY() - current.parent.pos.getY();
+            if (previousDy < 0 && dy > 0) return false;
+            if (previousDy != 0 && current.incoming.getAxis() != direction.getAxis()) return false;
+        }
+        return true;
+    }
+
+    private static boolean isolatedBridgeAllowed(TerrainMesh mesh, Node current, Direction direction, int dy,
+                                                 BlockPos candidate, Placement placement) {
+        if (current.supportPos != null) {
+            return direction == current.incoming && dy == 0 && placement.supportPos == null;
+        }
+        if (placement.supportPos == null) {
+            if (dy != 0 && levelBridgeRequired(mesh, current.pos, direction)) return false;
+            return true;
+        }
+        if (direction != current.incoming || dy != 0) return false;
+        Placement landing = mesh.placement(candidate.relative(direction));
+        return landing != null && landing.supportPos == null;
+    }
+
+    private static boolean levelBridgeRequired(TerrainMesh mesh, BlockPos current, Direction direction) {
+        Placement bridge = mesh.placement(current.relative(direction));
+        Placement landing = mesh.placement(current.relative(direction, 2));
+        return bridge != null && bridge.supportPos != null && landing != null && landing.supportPos == null;
+    }
+
+    private static boolean adjacencyAllowed(TerrainMesh mesh, Node current, BlockPos candidate) {
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            BlockPos column = candidate.relative(side);
+            for (int dy = -1; dy <= 1; dy++) {
+                BlockPos adjacent = column.offset(0, dy, 0);
+                if (adjacent.equals(current.pos)) continue;
+                if (!mesh.loadedAndRailFree(adjacent)) return false;
+                if (current.parent != null && bloomMightContain(current.parent, adjacent)) {
+                    for (Node ancestor = current.parent; ancestor != null; ancestor = ancestor.parent) {
+                        if (ancestor.pos.equals(adjacent)) return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean bloomMightContain(Node node, BlockPos pos) {
+        long hash = bloomHash(pos);
+        return (node.ancestryBloomA & bloomBitA(hash)) != 0
+                && (node.ancestryBloomB & bloomBitB(hash)) != 0;
+    }
+
+    private static long bloomHash(BlockPos pos) {
+        long value = pos.asLong();
+        value ^= value >>> 33;
+        value *= 0xff51afd7ed558ccdl;
+        value ^= value >>> 33;
+        value *= 0xc4ceb9fe1a85ec53l;
+        return value ^ value >>> 33;
+    }
+
+    private static long bloomBitA(long hash) { return 1L << (hash & 63); }
+    private static long bloomBitB(long hash) { return 1L << ((hash >>> 32) & 63); }
+
+    private static void publish(AtomicReference<SearchSnapshot> target, BlockPos origin, Direction heading,
+                                long generation, Map<BlockPos, Node> endpoints, int depth, int examined,
+                                CompletionReason reason) {
+        List<Node> diverse = RouteDiversitySelector.select(origin, endpoints.values(), node -> node.pos, 3, 7);
+        List<RouteProposal> result = new ArrayList<>(diverse.size());
+        for (int index = 0; index < diverse.size(); index++) {
+            Node endpoint = diverse.get(index);
+            List<Node> path = reconstruct(endpoint);
+            List<RouteStep> steps = new ArrayList<>(path.size());
+            for (int step = 0; step < path.size(); step++) {
+                BlockPos previous = step == 0 ? origin : path.get(step - 1).pos;
+                BlockPos current = path.get(step).pos;
+                BlockPos next = step + 1 < path.size() ? path.get(step + 1).pos : null;
+                steps.add(new RouteStep(current, shapeFor(previous, current, next), path.get(step).supportPos));
+            }
+            result.add(new RouteProposal(index, generation, origin, heading, endpoint.pos, steps));
+        }
+        target.set(new SearchSnapshot(result, depth, examined, reason));
     }
 
     private static List<Node> reconstruct(Node endpoint) {
@@ -419,7 +635,18 @@ public final class TerrainRoutePlanner {
     }
 
     private record Placement(@Nullable BlockPos supportPos) {}
+    private record MeshPoint(BlockPos pos, int depth) {}
+    private record WorldCell(boolean loaded, boolean rail) {}
     private record Key(BlockPos pos, Direction incoming, boolean hasTurn, int straightSinceTurn) {}
+    private record Candidate(
+            BlockPos pos,
+            Direction direction,
+            Node parent,
+            @Nullable BlockPos supportPos,
+            boolean hasTurn,
+            int straightSinceTurn,
+            Key key
+    ) {}
     private record Node(
             BlockPos pos,
             Direction incoming,
@@ -427,6 +654,9 @@ public final class TerrainRoutePlanner {
             @Nullable Node parent,
             @Nullable BlockPos supportPos,
             boolean hasTurn,
-            int straightSinceTurn
+            int straightSinceTurn,
+            long sequence,
+            long ancestryBloomA,
+            long ancestryBloomB
     ) {}
 }

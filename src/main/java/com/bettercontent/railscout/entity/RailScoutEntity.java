@@ -107,7 +107,8 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     private long proposalGeneration;
     private long previousGenerationExpires;
     private long nextRefreshTick;
-    private long planningStartedTick;
+    private long nextPreviewTick;
+    private int planningPublishedDepth = -1;
     private List<RouteProposal> proposals = List.of();
     private List<RouteProposal> previousProposals = List.of();
     @Nullable private TerrainRoutePlanner.Session planningSession;
@@ -296,20 +297,33 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         long now = level().getGameTime();
         if (planningSession == null) {
             if (mode == ScoutMode.READY && now < nextRefreshTick) return;
-            proposalGeneration++;
-            planningStartedTick = now;
+            nextPreviewTick = now + PLAN_REFRESH_TICKS;
+            planningPublishedDepth = -1;
             planningOrigin = rail.immutable();
             planningSession = TerrainRoutePlanner.begin(level(), rail, noseHeading,
-                    RailScoutConfig.ROUTE_RAIL_CAP.get(), proposalGeneration);
+                    RailScoutConfig.ROUTE_RAIL_CAP.get(), proposalGeneration + 1);
         }
-        if (!planningSession.advance(PLAN_NODE_BUDGET)) return;
-        List<RouteProposal> fresh = planningSession.proposals();
-        planningSession = null;
+        if (now >= nextPreviewTick) planningSession.requestPreview();
+        boolean complete = planningSession.advance(PLAN_NODE_BUDGET);
+        TerrainRoutePlanner.SearchSnapshot snapshot = planningSession.latestSnapshot();
+        if (snapshot == null || snapshot.deepestCompletedLayer() <= planningPublishedDepth
+                || (!complete && now < nextPreviewTick)) return;
+
+        proposalGeneration++;
+        List<RouteProposal> fresh = snapshot.proposals().stream()
+                .map(route -> new RouteProposal(route.id(), proposalGeneration, route.origin(),
+                        route.originHeading(), route.endpoint(), route.steps()))
+                .toList();
         previousProposals = proposals;
         previousGenerationExpires = now + GENERATION_GRACE_TICKS;
         proposals = fresh;
+        planningPublishedDepth = snapshot.deepestCompletedLayer();
         mode = ScoutMode.READY;
-        nextRefreshTick = planningStartedTick + PLAN_REFRESH_TICKS;
+        nextPreviewTick = now + PLAN_REFRESH_TICKS;
+        if (complete) {
+            planningSession = null;
+            nextRefreshTick = now + PLAN_REFRESH_TICKS;
+        }
         syncRoutes();
     }
 
@@ -843,8 +857,10 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     }
 
     private void clearPlanning() {
+        if (planningSession != null) planningSession.cancel();
         planningSession = null;
         planningOrigin = null;
+        planningPublishedDepth = -1;
     }
 
     private void clearPlanningAndProposals() {
@@ -1055,7 +1071,12 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         return super.getCapability(capability, side);
     }
 
-    @Override public void invalidateCaps() { super.invalidateCaps(); inventoryCapability.invalidate(); }
+    @Override
+    public void invalidateCaps() {
+        clearPlanning();
+        super.invalidateCaps();
+        inventoryCapability.invalidate();
+    }
 
     @Override
     public void reviveCaps() {

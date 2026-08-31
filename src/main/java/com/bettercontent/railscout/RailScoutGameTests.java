@@ -24,6 +24,8 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
 import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @GameTestHolder(RailScoutMod.MOD_ID)
@@ -224,6 +226,200 @@ public final class RailScoutGameTests {
         });
     }
 
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 180)
+    public static void forwardRecoversFromRollbackAndClimbsWithoutFlippingLamp(GameTestHelper helper) {
+        BlockPos foot = helper.absolutePos(new BlockPos(4, 2, 6));
+        placeEastHill(helper, foot, 7);
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        BlockPos topStart = foot.offset(2, 1, 0);
+        scout.setPos(topStart.getX() + 0.5, topStart.getY() + 0.0625, topStart.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        scout.setDeltaMovement(-0.18, 0, 0);
+        scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        helper.getLevel().addFreshEntity(scout);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
+        AtomicBoolean crossedBackward = new AtomicBoolean();
+        double startX = scout.getX();
+        scout.control(player, ScoutControl.HALF_SPEED);
+
+        helper.onEachTick(() -> {
+            if (scout.getX() < startX - 0.55) crossedBackward.set(true);
+            helper.assertTrue(scout.noseHeading() == Direction.EAST,
+                    "rollback must not redefine Forward or flip the amber lamp; pos=" + scout.position());
+        });
+        helper.runAfterDelay(120, () -> {
+            helper.assertTrue(crossedBackward.get(), "test impulse must carry the Scout across a rail boundary");
+            helper.assertTrue(scout.getX() > startX + 1.0,
+                    "Forward must recover from rollback and climb east; pos=" + scout.position());
+            helper.assertTrue(scout.getY() > foot.getY() + 0.7,
+                    "recovered Scout must remain on the upper railway; pos=" + scout.position());
+            helper.succeed();
+        });
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 180)
+    public static void coupledPassengerCartClimbsSlopeWithoutSnaps(GameTestHelper helper) {
+        BlockPos foot = helper.absolutePos(new BlockPos(6, 2, 16));
+        for (int x = -2; x < 0; x++) placeEastWestRail(helper, foot.offset(x, 0, 0));
+        placeEastHill(helper, foot, 7);
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(foot.getX() + 0.5, foot.getY() + 0.0625, foot.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        Minecart passengerCart = new Minecart(helper.getLevel(),
+                foot.getX() - 1.5, foot.getY() + 0.0625, foot.getZ() + 0.5);
+        helper.getLevel().addFreshEntity(scout);
+        helper.getLevel().addFreshEntity(passengerCart);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(passengerCart.getX(), passengerCart.getY(), passengerCart.getZ());
+        player.startRiding(passengerCart, true);
+        List<Double> samples = new ArrayList<>();
+
+        helper.runAfterDelay(2, () -> {
+            helper.assertTrue(CouplingHandler.tryToCoupleCarts(null, helper.getLevel(), scout.getId(), passengerCart.getId()),
+                    "Create must couple the Rail Scout to the passenger cart");
+            scout.control(player, ScoutControl.NORMAL_SPEED);
+        });
+        helper.onEachTick(() -> {
+            if (helper.getTick() >= 3 && helper.getTick() <= 100) samples.add(scout.getX());
+            helper.assertTrue(scout.noseHeading() == Direction.EAST,
+                    "coupled hill travel must keep the commanded forward heading");
+        });
+        helper.runAfterDelay(105, () -> {
+            var controller = scout.getCapability(CapabilityMinecartController.MINECART_CONTROLLER_CAPABILITY).orElse(null);
+            helper.assertTrue(controller != null
+                            && (controller.isLeadingCoupling() || controller.isConnectedToCoupling()),
+                    "hill traction must preserve the Create coupling");
+            helper.assertTrue(player.getVehicle() == passengerCart,
+                    "the passenger must remain mounted throughout the climb");
+            helper.assertTrue(scout.getX() > foot.getX() + 3.0 && scout.getY() > foot.getY() + 0.7,
+                    "the coupled Scout must climb onto the upper railway; pos=" + scout.position());
+            for (int index = 1; index < samples.size(); index++) {
+                double delta = samples.get(index) - samples.get(index - 1);
+                helper.assertTrue(delta > -0.08 && delta < 0.65,
+                        "coupled hill movement must not snap or reverse; delta=" + delta);
+            }
+            helper.succeed();
+        });
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void doubleSpeedClimbsSlopeWithoutChangingForward(GameTestHelper helper) {
+        BlockPos foot = helper.absolutePos(new BlockPos(4, 2, 10));
+        placeEastHill(helper, foot, 12);
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(foot.getX() + 0.5, foot.getY() + 0.0625, foot.getZ() + 0.5);
+        scout.setInitialHeading(Direction.EAST);
+        scout.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        helper.getLevel().addFreshEntity(scout);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(scout.getX(), scout.getY(), scout.getZ() + 1.0);
+        scout.control(player, ScoutControl.DOUBLE_SPEED);
+
+        helper.runAfterDelay(35, () -> {
+            helper.assertTrue(scout.getX() > foot.getX() + 2.0 && scout.getY() > foot.getY() + 0.7,
+                    "2x Forward must climb onto the upper railway; pos=" + scout.position());
+            helper.assertTrue(scout.noseHeading() == Direction.EAST,
+                    "2x hill travel must preserve the lamp-defined Forward direction");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 140)
+    public static void forwardAndReverseKeepSemanticHeadingThroughCorners(GameTestHelper helper) {
+        BlockPos forwardCurve = helper.absolutePos(new BlockPos(8, 2, 8));
+        placeNorthWestCorner(helper, forwardCurve);
+        RailScoutEntity forward = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(forward != null, "forward Scout entity type must create");
+        forward.setPos(forwardCurve.getX() - 1.5, forwardCurve.getY() + 0.0625, forwardCurve.getZ() + 0.5);
+        forward.setInitialHeading(Direction.EAST);
+        forward.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        helper.getLevel().addFreshEntity(forward);
+        net.minecraft.world.entity.player.Player forwardPlayer = helper.makeMockPlayer();
+        forwardPlayer.setPos(forward.getX(), forward.getY(), forward.getZ() + 1.0);
+        forward.control(forwardPlayer, ScoutControl.NORMAL_SPEED);
+
+        BlockPos reverseCurve = helper.absolutePos(new BlockPos(18, 2, 18));
+        placeNorthWestCorner(helper, reverseCurve);
+        RailScoutEntity reverse = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(reverse != null, "reverse Scout entity type must create");
+        reverse.setPos(reverseCurve.getX() + 0.5, reverseCurve.getY() + 0.0625, reverseCurve.getZ() - 1.5);
+        reverse.setInitialHeading(Direction.NORTH);
+        reverse.inventory().setStackInSlot(0, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        helper.getLevel().addFreshEntity(reverse);
+        net.minecraft.world.entity.player.Player reversePlayer = helper.makeMockPlayer();
+        reversePlayer.setPos(reverse.getX(), reverse.getY(), reverse.getZ() - 1.0);
+        reverse.control(reversePlayer, ScoutControl.REVERSE);
+        AtomicBoolean forwardTurned = new AtomicBoolean();
+        AtomicBoolean reverseTurned = new AtomicBoolean();
+
+        helper.onEachTick(() -> {
+            if (forward.noseHeading() == Direction.NORTH && forwardTurned.compareAndSet(false, true)) {
+                forward.control(forwardPlayer, ScoutControl.STOP);
+            }
+            if (reverse.noseHeading() == Direction.EAST && reverseTurned.compareAndSet(false, true)) {
+                reverse.control(reversePlayer, ScoutControl.STOP);
+            }
+        });
+
+        helper.runAfterDelay(90, () -> {
+            helper.assertTrue(forwardTurned.get(), "Forward must select the north exit through the corner");
+            helper.assertTrue(forward.noseHeading() == Direction.NORTH,
+                    "Forward nose must rotate to the intentionally selected north exit");
+            helper.assertTrue(reverseTurned.get(), "Reverse must select the west exit through the corner");
+            helper.assertTrue(reverse.noseHeading() == Direction.EAST,
+                    "after reversing west, the nose must still show that Forward means east");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 400)
+    public static void automaticRouteRewindsAndRecoversAfterRollback(GameTestHelper helper) {
+        BlockPos origin = helper.absolutePos(new BlockPos(4, 2, 4));
+        prepareSouthCorridor(helper, origin, 9);
+        RailScoutEntity scout = RailScoutRegistries.RAIL_SCOUT_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(scout != null, "Scout entity type must create");
+        scout.setPos(origin.getX() + 0.5, origin.getY() + 0.0625, origin.getZ() + 0.5);
+        scout.setInitialHeading(Direction.SOUTH);
+        scout.inventory().setStackInSlot(0, new ItemStack(Blocks.RAIL, 24));
+        scout.inventory().setStackInSlot(1, new ItemStack(net.minecraft.world.item.Items.COAL, 1));
+        helper.getLevel().addFreshEntity(scout);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        AtomicInteger progressBeforeRollback = new AtomicInteger();
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(!scout.proposals().isEmpty(),
+                        "Scout must plan the straight rollback test corridor"))
+                .thenExecute(() -> {
+                    RouteProposal route = scout.proposals().get(0);
+                    BlockPos first = route.steps().get(0).railPos();
+                    player.setPos(scout.getX(), scout.getY() + 1.0, scout.getZ() - 2.0);
+                    player.lookAt(EntityAnchorArgument.Anchor.EYES,
+                            new net.minecraft.world.phys.Vec3(first.getX() + 0.5, first.getY() + 0.2, first.getZ() + 0.5));
+                    scout.selectRoute(player, route.generation(), route.id());
+                    helper.assertTrue(scout.mode() == ScoutMode.DEPARTING,
+                            "selected rollback route must enter its departure phase");
+                })
+                .thenWaitUntil(() -> helper.assertTrue(scout.activeStep() >= 3,
+                        "Scout must advance far enough to exercise route rollback; progress=" + scout.activeStep()))
+                .thenExecute(() -> {
+                    progressBeforeRollback.set(scout.activeStep());
+                    scout.setDeltaMovement(0, 0, -0.22);
+                })
+                .thenWaitUntil(() -> helper.assertTrue(scout.activeStep() < progressBeforeRollback.get(),
+                        "route cursor must rewind when the Scout crosses onto an earlier route rail; progress="
+                                + scout.activeStep() + ", before=" + progressBeforeRollback.get()))
+                .thenWaitUntil(() -> helper.assertTrue(scout.activeStep() > progressBeforeRollback.get(),
+                        "automatic Forward must recover and resume route progress; progress=" + scout.activeStep()))
+                .thenExecute(() -> helper.assertTrue(scout.noseHeading() == Direction.SOUTH,
+                        "automatic rollback must not flip the route-defined forward heading"))
+                .thenSucceed();
+    }
+
     @GameTest(templateNamespace = RailScoutMod.MOD_ID, template = TEMPLATE, timeoutTicks = 300)
     public static void scoutBuildsRailAndShallowSupportThroughCaveCorridor(GameTestHelper helper) {
         BlockPos origin = helper.absolutePos(new BlockPos(4, 2, 4));
@@ -307,6 +503,56 @@ public final class RailScoutGameTests {
                         RailShape.NORTH_SOUTH));
         helper.getLevel().setBlockAndUpdate(origin.east(), Blocks.STONE.defaultBlockState());
         helper.getLevel().setBlockAndUpdate(origin.west(), Blocks.STONE.defaultBlockState());
+    }
+
+    private static void placeEastHill(GameTestHelper helper, BlockPos foot, int length) {
+        placeEastWestRail(helper, foot);
+        BlockPos slope = foot.east();
+        helper.getLevel().setBlockAndUpdate(slope.below(), Blocks.STONE.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(slope,
+                Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                        RailShape.ASCENDING_EAST));
+        for (int x = 2; x <= length; x++) placeEastWestRail(helper, foot.offset(x, 1, 0));
+    }
+
+    private static void placeEastWestRail(GameTestHelper helper, BlockPos rail) {
+        helper.getLevel().setBlockAndUpdate(rail.below(), Blocks.STONE.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(rail,
+                Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                        RailShape.EAST_WEST));
+    }
+
+    private static void placeNorthWestCorner(GameTestHelper helper, BlockPos curve) {
+        for (int x = 1; x <= 3; x++) placeEastWestRail(helper, curve.west(x));
+        helper.getLevel().setBlockAndUpdate(curve.below(), Blocks.STONE.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(curve,
+                Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                        RailShape.NORTH_WEST));
+        for (int z = 1; z <= 3; z++) {
+            BlockPos rail = curve.north(z);
+            helper.getLevel().setBlockAndUpdate(rail.below(), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail,
+                    Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                            RailShape.NORTH_SOUTH));
+        }
+    }
+
+    private static void prepareSouthCorridor(GameTestHelper helper, BlockPos origin, int length) {
+        for (int z = 0; z <= length; z++) {
+            BlockPos rail = origin.south(z);
+            helper.getLevel().setBlockAndUpdate(rail.below(), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail, Blocks.AIR.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail.above(), Blocks.AIR.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail.east(), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail.west(), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail.east().above(), Blocks.STONE.defaultBlockState());
+            helper.getLevel().setBlockAndUpdate(rail.west().above(), Blocks.STONE.defaultBlockState());
+        }
+        helper.getLevel().setBlockAndUpdate(origin,
+                Blocks.RAIL.defaultBlockState().setValue(net.minecraft.world.level.block.RailBlock.SHAPE,
+                        RailShape.NORTH_SOUTH));
+        helper.getLevel().setBlockAndUpdate(origin.south(length), Blocks.STONE.defaultBlockState());
+        helper.getLevel().setBlockAndUpdate(origin.south(length).above(), Blocks.STONE.defaultBlockState());
     }
 
     private record Vec3Holder(double x, double y, double z) {}

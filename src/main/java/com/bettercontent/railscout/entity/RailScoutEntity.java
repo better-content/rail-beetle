@@ -104,6 +104,9 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     @Nullable private BlockPos planningOrigin;
     @Nullable private RouteProposal activeRoute;
     @Nullable private BlockPos lastRail;
+    @Nullable private BlockPos commandedFromRail;
+    @Nullable private BlockPos commandedNextRail;
+    private boolean commandedTravelIsForward;
     private boolean inventoryDropped;
 
     public RailScoutEntity(EntityType<? extends RailScoutEntity> type, Level level) {
@@ -166,6 +169,8 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
     }
 
     private void serverPreTick() {
+        commandedFromRail = null;
+        commandedNextRail = null;
         BlockPos rail = railPosition();
         initializeHeading(rail);
         normalizeState(rail);
@@ -189,7 +194,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         updateHeadingForRailTransition(rail);
         if (forcedBrake || !mode.moves()) setDeltaMovement(Vec3.ZERO);
         if (mode == ScoutMode.DEPARTING && departureTicks > 0 && --departureTicks == 0) mode = ScoutMode.AUTO_BUILD;
-        advanceActiveProgress(rail);
+        reconcileActiveProgress(rail);
         syncStatus();
     }
 
@@ -227,11 +232,21 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
 
     private void updateHeadingForRailTransition(@Nullable BlockPos rail) {
         if (rail == null || rail.equals(lastRail)) return;
-        if (lastRail != null) {
+        if (lastRail != null && lastRail.equals(commandedFromRail) && commandedNextRail != null) {
             Direction travel = horizontalDirection(lastRail, rail);
-            if (travel != null) noseHeading = mode == ScoutMode.MANUAL_REVERSE ? travel.getOpposite() : travel;
+            if (travel != null) {
+                boolean followedCommand = rail.equals(commandedNextRail);
+                boolean travelledForward = followedCommand == commandedTravelIsForward;
+                noseHeading = travelledForward ? travel : travel.getOpposite();
+            }
         }
         lastRail = rail;
+    }
+
+    private void expectTransition(BlockPos from, BlockPos next, boolean travellingForward) {
+        commandedFromRail = from.immutable();
+        commandedNextRail = next.immutable();
+        commandedTravelIsForward = travellingForward;
     }
 
     private void beginPlanning(BlockPos origin) {
@@ -275,6 +290,7 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
             recoverFromInvalidRoute();
             return false;
         }
+        reconcileActiveProgress(rail);
         int lookAhead = Math.min(activeRoute.steps().size(), activeStep + 4);
         for (int index = activeStep; index < lookAhead; index++) {
             if (!ensureStepPlaced(index)) return false;
@@ -285,13 +301,15 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
                 finishRoute();
                 return false;
             }
-            return accelerateAlong(noseHeading, stoppingSpeed(remaining));
+            return accelerateAlong(noseHeading, stoppingSpeed(remaining), false);
         }
         BlockPos next = activeRoute.steps().get(activeStep).railPos();
         Direction travel = horizontalDirection(rail, next);
         if (travel == null) travel = noseHeading;
+        noseHeading = travel;
+        expectTransition(rail, next, true);
         double selected = mode == ScoutMode.DEPARTING ? ScoutSpeed.HALF.blocksPerTick() : speedTier.blocksPerTick();
-        return accelerateAlong(travel, Math.min(selected, stoppingSpeed(remainingRouteDistance())));
+        return accelerateAlong(travel, Math.min(selected, stoppingSpeed(remainingRouteDistance())), next.getY() > rail.getY());
     }
 
     private boolean prepareManualMovement(@Nullable BlockPos rail) {
@@ -302,26 +320,30 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         boolean reverse = mode == ScoutMode.MANUAL_REVERSE;
         Direction travelHeading = reverse ? noseHeading.getOpposite() : noseHeading;
         Direction exit = resolveExit(rail, travelHeading);
+        if (exit != null) noseHeading = reverse ? exit.getOpposite() : exit;
+        Direction movementHeading = exit == null ? travelHeading : exit;
         BlockPos next = exit == null ? null : connectedRail(rail, exit);
         if (next == null) {
-            double toCenter = forwardDistance(position(), railCenter(rail), travelHeading);
+            double toCenter = forwardDistance(position(), railCenter(rail), movementHeading);
             if (horizontalSpeed() < 0.035 || toCenter <= 0.08) {
                 setDeltaMovement(Vec3.ZERO);
                 if (!reverse && isForwardTerminus(rail)) beginPlanning(rail); else mode = ScoutMode.STOPPED;
                 return false;
             }
-            return accelerateAlong(travelHeading, stoppingSpeed(Math.max(0, toCenter)));
+            return accelerateAlong(movementHeading, stoppingSpeed(Math.max(0, toCenter)), false);
         }
         double requested = reverse ? REVERSE_SPEED : speedTier.blocksPerTick();
-        return accelerateAlong(exit, Math.min(requested, stoppingSpeed(connectedDistanceAhead(rail, travelHeading, 12))));
+        expectTransition(rail, next, !reverse);
+        return accelerateAlong(exit, Math.min(requested, stoppingSpeed(connectedDistanceAhead(rail, exit, 12))),
+                next.getY() > rail.getY());
     }
 
-    private boolean accelerateAlong(Direction direction, double targetSpeed) {
+    private boolean accelerateAlong(Direction direction, double targetSpeed, boolean uphill) {
         Vec3 motion = getDeltaMovement();
         Vec3 tangent = new Vec3(direction.getStepX(), 0, direction.getStepZ());
         double along = motion.x * tangent.x + motion.z * tangent.z;
         double difference = targetSpeed - along;
-        double limit = difference >= 0 ? ACCELERATION : SERVICE_DECELERATION;
+        double limit = difference >= 0 ? ACCELERATION + (uphill ? getSlopeAdjustment() : 0) : SERVICE_DECELERATION;
         double change = Mth.clamp(difference, -limit, limit);
         double perpendicularX = motion.x - tangent.x * along;
         double perpendicularZ = motion.z - tangent.z * along;
@@ -366,9 +388,18 @@ public final class RailScoutEntity extends Minecart implements MenuProvider {
         return distance;
     }
 
-    private void advanceActiveProgress(@Nullable BlockPos rail) {
+    private void reconcileActiveProgress(@Nullable BlockPos rail) {
         if (activeRoute == null || rail == null || !mode.hasActiveRoute()) return;
-        while (activeStep < activeRoute.steps().size() && rail.equals(activeRoute.steps().get(activeStep).railPos())) activeStep++;
+        if (rail.equals(activeRoute.origin())) {
+            activeStep = 0;
+            return;
+        }
+        for (int index = 0; index < activeRoute.steps().size(); index++) {
+            if (rail.equals(activeRoute.steps().get(index).railPos())) {
+                activeStep = index + 1;
+                return;
+            }
+        }
     }
 
     private void finishRoute() {

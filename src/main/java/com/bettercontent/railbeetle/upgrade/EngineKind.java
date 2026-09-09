@@ -3,8 +3,8 @@ package com.bettercontent.railbeetle.upgrade;
 import net.minecraftforge.fml.ModList;
 
 public enum EngineKind {
-    FIREBOX("firebox", "", 0, "burn-work"),
-    STEAM("steam_drive", "create", 144_000, "burn-work"),
+    FIREBOX("firebox", "", 0, "work"),
+    STEAM("steam_drive", "create", 144_000, "work"),
     FLUX("flux_traction_motor", "powergrid", 36_864_000, "FE"),
     SOURCE("source_impeller", "ars_nouveau", 144_000, "Source"),
     LIFEFORCE("lifeforce_ram", "bloodmagic", 144_000, "mB"),

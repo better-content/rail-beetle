@@ -104,7 +104,9 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
         for (int slot = 0; slot < menu.slots.size(); slot++) {
             var value = menu.slots.get(slot);
             graphics.fill(leftPos + value.x - 1, topPos + value.y - 1,
-                    leftPos + value.x + 17, topPos + value.y + 17, 0xff3b434a);
+                    leftPos + value.x + 17, topPos + value.y + 17, 0xff59636a);
+            graphics.fill(leftPos + value.x, topPos + value.y,
+                    leftPos + value.x + 16, topPos + value.y + 16, 0xff30373c);
         }
         RailBeetleEntity beetle = menu.beetle();
         int capacity = Math.max(1, beetle.engineKind().builtIn() ? 1_600 : beetle.engineKind().capacity());

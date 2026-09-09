@@ -4,12 +4,24 @@ import com.bettercontent.railbeetle.upgrade.EngineKind;
 import com.bettercontent.railbeetle.upgrade.ModuleKind;
 import org.junit.jupiter.api.Test;
 
+import javax.imageio.ImageIO;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 final class RailBeetleResourceTest {
+    @Test void entityMaterialAtlasIsPresentAtMinecraftTextureResolution() throws IOException {
+        try (var stream = getClass().getResourceAsStream(
+                "/assets/rail_beetle/textures/entity/rail_beetle.png")) {
+            assertNotNull(stream, "missing Rail Beetle entity texture atlas");
+            var image = ImageIO.read(stream);
+            assertNotNull(image, "Rail Beetle entity texture atlas must be a readable image");
+            assertEquals(64, image.getWidth());
+            assertEquals(64, image.getHeight());
+        }
+    }
+
     @Test void everyMachineryItemHasANameModelAndTooltip() throws IOException {
         String lang = resource("/assets/rail_beetle/lang/en_us.json");
         for (EngineKind kind : EngineKind.values()) {

@@ -107,6 +107,7 @@
   "screen.rail_beetle.engine": "ENGINE",
   "screen.rail_beetle.modules": "MODULES",
   "screen.rail_beetle.machinery_locked": "Stop and apply brakes to service machinery",
+  "screen.rail_beetle.machinery_locked.short": "LOCKED",
   "screen.rail_beetle.remote.title": "Rail Beetle Dispatch",
   "screen.rail_beetle.remote.status": "%s · %s %s",
 

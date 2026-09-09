@@ -130,12 +130,11 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
                     com.bettercontent.railbeetle.upgrade.EngineKind.compactAmount(beetle.engineResource()),
                     beetle.engineKind().unit(), beetle.fallbackFuel());
         graphics.drawString(font, supplies, 169 - font.width(supplies), titleLabelY, 0xbddce5, false);
-        graphics.drawString(font, Component.translatable("screen.rail_beetle.engine"), 177, 6, 0xffd6aa5b, false);
+        boolean configurable = beetle.canConfigureMachinery();
+        graphics.drawString(font, Component.translatable(configurable
+                ? "screen.rail_beetle.engine" : "screen.rail_beetle.machinery_locked.short"),
+                177, 6, configurable ? 0xffd6aa5b : 0xffff8f84, false);
         graphics.drawString(font, Component.translatable("screen.rail_beetle.modules"), 177, 31, 0xffc6a96e, false);
-        if (!beetle.canConfigureMachinery()) {
-            Component locked = Component.translatable("screen.rail_beetle.machinery_locked");
-            graphics.drawWordWrap(font, locked, 177, 17, 59, 0xffffb0a5);
-        }
         graphics.drawString(font, playerInventoryTitle, inventoryLabelX, inventoryLabelY, 0xcbd2d6, false);
     }
 

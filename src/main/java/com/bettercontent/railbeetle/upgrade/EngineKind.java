@@ -2,6 +2,8 @@ package com.bettercontent.railbeetle.upgrade;
 
 import net.minecraftforge.fml.ModList;
 
+import java.util.Locale;
+
 public enum EngineKind {
     FIREBOX("firebox", "", 0, "work"),
     STEAM("steam_drive", "create", 144_000, "work"),
@@ -30,6 +32,14 @@ public enum EngineKind {
     public String unit() { return unit; }
     public boolean builtIn() { return this == FIREBOX; }
     public boolean available() { return requiredMod.isEmpty() || ModList.get().isLoaded(requiredMod); }
+
+    public static String compactAmount(int amount) {
+        int safe = Math.max(0, amount);
+        if (safe < 1_000) return Integer.toString(safe);
+        if (safe < 10_000) return String.format(Locale.ROOT, "%.1fk", safe / 1_000.0);
+        if (safe < 1_000_000) return (safe / 1_000) + "k";
+        return String.format(Locale.ROOT, "%.1fM", safe / 1_000_000.0);
+    }
 
     public int nativeCost(int work) {
         if (work <= 0) return 0;

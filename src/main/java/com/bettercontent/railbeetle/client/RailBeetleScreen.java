@@ -124,9 +124,11 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
         graphics.drawString(font, title, titleLabelX, titleLabelY, 0xe8f5f8, false);
         Component supplies = beetle.engineKind().builtIn()
                 ? Component.translatable("screen.rail_beetle.supplies", beetle.railCount(), beetle.supportCount(),
-                    beetle.engineResource(), beetle.engineKind().unit())
+                    com.bettercontent.railbeetle.upgrade.EngineKind.compactAmount(beetle.engineResource()),
+                    beetle.engineKind().unit())
                 : Component.translatable("screen.rail_beetle.supplies.alt", beetle.railCount(), beetle.supportCount(),
-                    beetle.engineResource(), beetle.engineKind().unit(), beetle.fallbackFuel());
+                    com.bettercontent.railbeetle.upgrade.EngineKind.compactAmount(beetle.engineResource()),
+                    beetle.engineKind().unit(), beetle.fallbackFuel());
         graphics.drawString(font, supplies, 169 - font.width(supplies), titleLabelY, 0xbddce5, false);
         graphics.drawString(font, Component.translatable("screen.rail_beetle.engine"), 177, 6, 0xffd6aa5b, false);
         graphics.drawString(font, Component.translatable("screen.rail_beetle.modules"), 177, 31, 0xffc6a96e, false);

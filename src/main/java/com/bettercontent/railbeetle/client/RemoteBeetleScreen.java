@@ -57,8 +57,8 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
     @Override protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
         graphics.drawString(font, title, 8, 6, 0xffe8f5f8, false);
         Component status = Component.translatable("screen.rail_beetle.remote.status",
-                Component.translatable("engine.rail_beetle." + menu.engineKind().id()), menu.engineResource(),
-                menu.engineKind().unit());
+                Component.translatable("engine.rail_beetle." + menu.engineKind().id()),
+                com.bettercontent.railbeetle.upgrade.EngineKind.compactAmount(menu.engineResource()), menu.engineKind().unit());
         graphics.drawString(font, status, 10, 22, 0xffcbd2d6, false);
         if (!menu.engineKind().builtIn()) {
             graphics.drawString(font, Component.translatable("screen.rail_beetle.fallback", menu.fallbackFuel()),

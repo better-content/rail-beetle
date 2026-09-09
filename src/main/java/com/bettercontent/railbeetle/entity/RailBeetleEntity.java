@@ -238,7 +238,13 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         entityData.set(DATA_SEARCHLIGHT, !entityData.get(DATA_SEARCHLIGHT));
     }
 
-    public boolean canConfigureMachinery() { return !mode().moves() && brakeApplied(); }
+    public boolean canConfigureMachinery() {
+        // Forge may ask for capabilities from Entity's constructor, before this class's
+        // field initializers have created the handlers and server-side mode state.
+        if (inventoryCapability == null) return false;
+        BeetleMode current = mode();
+        return current != null && !current.moves() && brakeApplied();
+    }
 
     public BeetleMode mode() {
         if (!level().isClientSide) return mode;

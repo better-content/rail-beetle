@@ -1,0 +1,11 @@
+{
+  "whistle": {
+    "subtitle": "subtitles.rail_beetle.whistle",
+    "sounds": [
+      {
+        "name": "rail_beetle:whistle",
+        "stream": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "rail_beetle:block/route_beacon" }
+  }
+}

@@ -2,9 +2,9 @@
 
 ## Project identity
 
-- Repository and artifact: `rail-scout`
-- Mod ID and namespace: `rail_scout`
-- Base package: `com.bettercontent.railscout`
+- Repository and artifact: `rail-beetle`
+- Mod ID and namespace: `rail_beetle`
+- Base package: `com.bettercontent.railbeetle`
 - Java: 17
 - Minecraft/Forge: 1.20.1 / 47.4.13
 - Optional runtime integration: Create 6.0.8

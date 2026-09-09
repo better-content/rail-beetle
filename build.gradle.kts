@@ -12,6 +12,7 @@ val flywheelVersion = property("flywheel_version") as String
 val registrateVersion = property("registrate_version") as String
 val modId = property("mod_id") as String
 val modVersion = property("mod_version") as String
+val unitTestRuntime by configurations.creating
 
 group = property("mod_group") as String
 version = modVersion
@@ -64,6 +65,7 @@ dependencies {
     runtimeOnly(deobf("dev.engine-room.flywheel:flywheel-forge-$minecraftVersion:$flywheelVersion"))
     implementation(deobf("com.tterrag.registrate:Registrate:$registrateVersion"))
     implementation("io.github.llamalad7:mixinextras-forge:0.5.4")
+    compileOnly(deobf("curse.maven:sodiumdynamiclights-551736:6044481"))
 
     runtimeOnly(deobf("curse.maven:citadel-331936:7476570"))
     runtimeOnly(deobf("curse.maven:alexs-caves-924854:5848216"))
@@ -71,6 +73,7 @@ dependencies {
     runtimeOnly(deobf("curse.maven:yungs-better-caves-340583:8686226"))
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    unitTestRuntime("org.junit.jupiter:junit-jupiter-engine:5.10.2")
 }
 
 tasks.processResources {
@@ -89,7 +92,12 @@ tasks.processResources {
 }
 
 tasks.withType<JavaCompile>().configureEach { options.release.set(17) }
-tasks.withType<Test>().configureEach { useJUnitPlatform() }
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    // Deterministic unit tests do not need the heavyweight cave-integration runtime.
+    classpath = sourceSets["test"].output + sourceSets["main"].output +
+            configurations.testCompileClasspath.get() + unitTestRuntime
+}
 tasks.named<Jar>("jar") { finalizedBy("reobfJar") }
 
 val stageRuntimeJar by tasks.registering(Copy::class) {

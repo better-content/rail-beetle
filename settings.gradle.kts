@@ -6,4 +6,4 @@ pluginManagement {
     }
 }
 
-rootProject.name = "rail-scout"
+rootProject.name = "rail-beetle"

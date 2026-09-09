@@ -1,8 +1,8 @@
 # Third-Party Notices
 
-## Rail Scout whistle
+## Rail Beetle whistle
 
-- Asset: `assets/rail_scout/sounds/whistle.ogg`
+- Asset: `assets/rail_beetle/sounds/whistle.ogg`
 - Source: [Parovoz sound.ogg](https://commons.wikimedia.org/wiki/File:Parovoz_sound.ogg)
 - Original author: Alex Alex Lep
 - Original date: 2008
@@ -11,7 +11,7 @@
 - Original SHA-1: `e969746d13cfafac7a9c42bfdd4d1ddc0323bcaa`
 - Original SHA-256: `838251a89da43f8994b95a1bdaa07064d38291fa96a1314e63e2a18f57991f3e`
 
-The Rail Scout version is a modified excerpt. It uses the first 1.25 seconds of
+The Rail Beetle version is a modified excerpt. It uses the first 1.25 seconds of
 the original mono recording, with a 30 ms fade-in, a fade-out from 0.90 to 1.25
 seconds, loudness normalization, and a final peak below 0 dBFS. It is encoded as
 mono Ogg Vorbis at 44.1 kHz. The processed file's SHA-256 is

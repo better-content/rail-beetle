@@ -15,7 +15,7 @@ import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.resources.ResourceLocation;
 
-/** An industrial rail automaton whose functional parts happen to form a beetle-like silhouette. */
+/** A compact track machine with a few beetle-like echoes in its paired armor and equipment. */
 public final class RailBeetleRenderer extends EntityRenderer<RailBeetleEntity> {
     private static final ResourceLocation TEXTURE =
             ResourceLocation.fromNamespaceAndPath("rail_beetle", "textures/entity/rail_beetle.png");
@@ -36,20 +36,27 @@ public final class RailBeetleRenderer extends EntityRenderer<RailBeetleEntity> {
         MaterialBuffer materials = new MaterialBuffer(
                 buffers.getBuffer(RenderType.entityCutoutNoCull(TEXTURE)), packedLight);
 
-        box(pose, materials, -0.70, 0.02, -0.98, 0.70, 0.19, 0.83, Material.TREAD);
-        box(pose, materials, -0.62, 0.19, -0.30, 0.62, 0.52, 0.78, Material.TIMBER);
-        box(pose, materials, -0.67, 0.48, -0.35, 0.67, 0.58, 0.83, Material.AGED_BRASS);
-        box(pose, materials, -0.50, 0.58, -0.18, 0.50, 0.86, 0.62, Material.STEEL);
-        box(pose, materials, -0.17, 0.86, -0.02, 0.17, 1.05, 0.39, Material.GEAR);
-        box(pose, materials, -0.58, 0.55, -0.22, -0.52, 0.75, 0.60, Material.COPPER);
-        box(pose, materials, 0.52, 0.55, -0.22, 0.58, 0.75, 0.60, Material.COPPER);
-        box(pose, materials, -0.28, 0.70, -0.24, 0.28, 0.86, -0.15, Material.AGED_BRASS);
-        box(pose, materials, -0.20, 0.74, -0.255, 0.20, 0.82, -0.245, Material.AMBER);
+        // Long underframe, running boards, buffer beams, hood, and cab establish the railway
+        // silhouette before any upgrade-specific equipment is added.
+        box(pose, materials, -0.62, 0.02, -1.20, 0.62, 0.18, 1.08, Material.TREAD);
+        box(pose, materials, -0.70, 0.15, -1.12, -0.54, 0.28, 1.02, Material.STEEL_EDGE);
+        box(pose, materials, 0.54, 0.15, -1.12, 0.70, 0.28, 1.02, Material.STEEL_EDGE);
+        box(pose, materials, -0.74, 0.18, -1.24, 0.74, 0.32, -1.12, Material.AGED_BRASS);
+        box(pose, materials, -0.69, 0.18, 1.01, 0.69, 0.31, 1.13, Material.AGED_BRASS);
+
+        box(pose, materials, -0.50, 0.28, -0.94, 0.50, 0.69, 0.18, Material.STEEL);
+        box(pose, materials, -0.44, 0.38, -0.955, 0.44, 0.61, -0.945, Material.GRILLE);
+        box(pose, materials, -0.47, 0.32, 0.20, 0.47, 1.07, 0.91, Material.STEEL_EDGE);
+        box(pose, materials, -0.39, 0.67, 0.19, 0.39, 0.96, 0.205, Material.AMBER);
+        box(pose, materials, -0.485, 0.62, 0.35, -0.475, 0.94, 0.80, Material.CYAN);
+        box(pose, materials, 0.475, 0.62, 0.35, 0.485, 0.94, 0.80, Material.CYAN);
+        box(pose, materials, -0.55, 1.04, 0.13, 0.55, 1.17, 0.96, Material.AGED_BRASS);
+        box(pose, materials, -0.42, 0.30, 0.91, 0.42, 0.70, 1.04, Material.TIMBER);
 
         renderCovers(beetle, pose, materials, phase, working);
-        renderMandibles(pose, materials, phase, working);
+        renderBuffers(pose, materials);
         renderSurveyBooms(beetle, pose, materials, phase);
-        renderToolAssemblies(beetle, pose, materials, phase);
+        renderRunningGear(beetle, pose, materials, phase);
         renderEngine(beetle.engineKind(), pose, materials, phase);
         renderModules(beetle.profile(), pose, materials, phase);
         renderSearchlight(beetle, pose, materials);
@@ -59,62 +66,55 @@ public final class RailBeetleRenderer extends EntityRenderer<RailBeetleEntity> {
 
     private static void renderCovers(RailBeetleEntity beetle, PoseStack pose, MaterialBuffer materials,
                                      float phase, float working) {
-        float lift = working * (11.0f + 3.0f * (float) Math.sin(phase));
+        float lift = working * (9.0f + 2.0f * (float) Math.sin(phase));
         for (int side : new int[]{-1, 1}) {
             pose.pushPose();
-            pose.translate(side * 0.12, 0.80, 0.22);
+            pose.translate(side * 0.04, 0.69, -0.38);
             pose.mulPose(Axis.ZP.rotationDegrees(side * -lift));
-            box(pose, materials, side < 0 ? -0.53 : 0.02, 0, -0.34,
-                    side < 0 ? -0.02 : 0.53, 0.10, 0.40, Material.STEEL_EDGE);
-            box(pose, materials, side < 0 ? -0.45 : 0.08, 0.08, -0.26,
-                    side < 0 ? -0.08 : 0.45, 0.13, 0.32, Material.BRASS);
+            box(pose, materials, side < 0 ? -0.48 : 0.00, 0, -0.55,
+                    side < 0 ? 0.00 : 0.48, 0.08, 0.55, Material.STEEL_EDGE);
+            box(pose, materials, side < 0 ? -0.42 : 0.05, 0.07, -0.48,
+                    side < 0 ? -0.05 : 0.42, 0.12, 0.48, Material.BRASS);
             pose.popPose();
         }
     }
 
-    private static void renderMandibles(PoseStack pose, MaterialBuffer materials, float phase, float working) {
-        float bite = working * (6.0f + 7.0f * (float) Math.sin(phase * 1.7f));
-        for (int side : new int[]{-1, 1}) {
-            pose.pushPose();
-            pose.translate(side * 0.30, 0.30, -0.86);
-            pose.mulPose(Axis.YP.rotationDegrees(side * bite));
-            box(pose, materials, side < 0 ? -0.28 : -0.03, -0.06, -0.45,
-                    side < 0 ? 0.03 : 0.28, 0.07, 0.05, Material.BRASS);
-            box(pose, materials, side < 0 ? -0.32 : 0.18, -0.13, -0.52,
-                    side < 0 ? -0.18 : 0.32, 0.03, -0.35, Material.STEEL_EDGE);
-            pose.popPose();
-        }
+    private static void renderBuffers(PoseStack pose, MaterialBuffer materials) {
+        box(pose, materials, -0.55, 0.20, -1.38, -0.35, 0.38, -1.22, Material.STEEL_EDGE);
+        box(pose, materials, 0.35, 0.20, -1.38, 0.55, 0.38, -1.22, Material.STEEL_EDGE);
+        box(pose, materials, -0.13, 0.13, -1.47, 0.13, 0.34, -1.20, Material.GEAR);
+        box(pose, materials, -0.46, 0.49, -1.00, -0.31, 0.65, -0.94, Material.AMBER);
+        box(pose, materials, 0.31, 0.49, -1.00, 0.46, 0.65, -0.94, Material.AMBER);
     }
 
     private static void renderSurveyBooms(RailBeetleEntity beetle, PoseStack pose,
                                           MaterialBuffer materials, float phase) {
-        float extension = beetle.mode() == BeetleMode.PLANNING || beetle.mode() == BeetleMode.READY ? 0.36f : 0.0f;
-        extension += beetle.profile().surveyTier() * 0.10f;
+        float extension = beetle.mode() == BeetleMode.PLANNING || beetle.mode() == BeetleMode.READY ? 0.22f : 0.0f;
+        extension += beetle.profile().surveyTier() * 0.09f;
         for (int side : new int[]{-1, 1}) {
             pose.pushPose();
-            pose.translate(side * 0.27, 0.88, -0.46);
-            pose.mulPose(Axis.XP.rotationDegrees(side * 2.0f * (float) Math.sin(phase * 0.6f)));
-            box(pose, materials, -0.035, 0, -0.40 - extension, 0.035, 0.07, 0.04, Material.COPPER);
-            box(pose, materials, -0.075, -0.02, -0.46 - extension, 0.075, 0.11,
-                    -0.35 - extension, Material.AMBER);
+            pose.translate(side * 0.39, 0.76, -0.44);
+            pose.mulPose(Axis.XP.rotationDegrees(1.5f * (float) Math.sin(phase * 0.6f)));
+            box(pose, materials, -0.03, -0.02, -0.50 - extension, 0.03, 0.05, 0.34, Material.COPPER);
+            box(pose, materials, -0.07, -0.04, -0.57 - extension, 0.07, 0.09,
+                    -0.47 - extension, Material.AMBER);
             pose.popPose();
         }
     }
 
-    private static void renderToolAssemblies(RailBeetleEntity beetle, PoseStack pose,
-                                             MaterialBuffer materials, float phase) {
-        for (int side : new int[]{-1, 1}) for (int index = 0; index < 3; index++) {
-            double z = -0.48 + index * 0.52;
-            float pump = beetle.mode().moves() ? (float) Math.sin(phase + index * 2.1f) * 0.06f : 0;
-            pose.pushPose();
-            pose.translate(side * 0.62, 0.31 + pump, z);
-            pose.mulPose(Axis.ZP.rotationDegrees(side * (18.0f + pump * 90.0f)));
-            box(pose, materials, side < 0 ? -0.27 : -0.02, -0.045, -0.06,
-                    side < 0 ? 0.02 : 0.27, 0.045, 0.06, Material.STEEL_EDGE);
-            box(pose, materials, side < 0 ? -0.33 : 0.22, -0.10, -0.10,
-                    side < 0 ? -0.22 : 0.33, 0.10, 0.10,
-                    index == 1 && beetle.profile().brakeTier() > 0 ? Material.RED : Material.AGED_BRASS);
-            pose.popPose();
+    private static void renderRunningGear(RailBeetleEntity beetle, PoseStack pose,
+                                          MaterialBuffer materials, float phase) {
+        Material brake = beetle.profile().brakeTier() > 0 ? Material.RED : Material.AGED_BRASS;
+        float rodTravel = beetle.mode().moves() ? (float) Math.sin(phase * 2.0f) * 0.035f : 0;
+        for (int side : new int[]{-1, 1}) {
+            for (double z : new double[]{-0.72, 0.58}) {
+                box(pose, materials, side < 0 ? -0.76 : 0.58, -0.03, z - 0.18,
+                        side < 0 ? -0.58 : 0.76, 0.25, z + 0.18, Material.GEAR);
+                box(pose, materials, side < 0 ? -0.81 : 0.72, 0.04, z - 0.10,
+                        side < 0 ? -0.72 : 0.81, 0.20, z + 0.10, brake);
+            }
+            box(pose, materials, side < 0 ? -0.82 : 0.74, 0.08 + rodTravel, -0.75,
+                    side < 0 ? -0.74 : 0.82, 0.14 + rodTravel, 0.62, Material.BRASS);
         }
     }
 
@@ -128,58 +128,59 @@ public final class RailBeetleRenderer extends EntityRenderer<RailBeetleEntity> {
             case SOUL -> Material.PALE;
             default -> Material.AMBER;
         };
-        box(pose, materials, -0.34, 0.22, 0.48, 0.34, 0.67, 0.83, accent);
-        box(pose, materials, -0.25, 0.64, 0.54, 0.25, 0.76, 0.78, Material.VENT);
+        box(pose, materials, -0.505, 0.39, -0.63, -0.495, 0.63, 0.02, accent);
+        box(pose, materials, 0.495, 0.39, -0.63, 0.505, 0.63, 0.02, accent);
+        box(pose, materials, -0.28, 0.68, -0.48, 0.28, 0.76, -0.08, Material.VENT);
         if (kind == EngineKind.STEAM) {
             double pulse = 0.04 * Math.sin(phase);
-            box(pose, materials, -0.11, 0.75, 0.61, 0.11, 1.02 + pulse, 0.78,
+            box(pose, materials, -0.11, 0.74, -0.70, 0.11, 1.02 + pulse, -0.50,
                     Material.GRILLE);
         } else if (kind == EngineKind.FLUX || kind == EngineKind.PRESSURE) {
-            box(pose, materials, -0.43, 0.34, 0.55, -0.34, 0.57, 0.77, Material.BRASS);
-            box(pose, materials, 0.34, 0.34, 0.55, 0.43, 0.57, 0.77, Material.BRASS);
+            box(pose, materials, -0.58, 0.38, -0.48, -0.50, 0.62, -0.12, Material.BRASS);
+            box(pose, materials, 0.50, 0.38, -0.48, 0.58, 0.62, -0.12, Material.BRASS);
         }
     }
 
     private static void renderModules(BeetleProfile p, PoseStack pose, MaterialBuffer materials, float phase) {
         if (p.governorTier() > 0) {
             pose.pushPose();
-            pose.translate(0, 0.98, 0.28);
+            pose.translate(0, 0.82, -0.22);
             pose.mulPose(Axis.YP.rotationDegrees(phase * (p.governorTier() == 2 ? 32.0f : 18.0f)));
             box(pose, materials, -0.23, -0.03, -0.035, 0.23, 0.03, 0.035, Material.GEAR);
             box(pose, materials, -0.035, -0.03, -0.23, 0.035, 0.03, 0.23, Material.GEAR);
             pose.popPose();
         }
         if (p.recuperatorTier() > 0) {
-            box(pose, materials, -0.45, 0.68, 0.60, -0.34, 0.93, 0.75, Material.COPPER);
+            box(pose, materials, -0.40, 0.76, 0.03, -0.27, 1.06, 0.17, Material.COPPER);
         }
         if (p.adhesionTier() > 0) {
-            box(pose, materials, -0.70, 0.12, -0.70, -0.61, 0.31, -0.35, Material.AGED_BRASS);
-            box(pose, materials, 0.61, 0.12, -0.70, 0.70, 0.31, -0.35, Material.AGED_BRASS);
+            box(pose, materials, -0.69, 0.26, -0.83, -0.53, 0.45, -0.45, Material.AGED_BRASS);
+            box(pose, materials, 0.53, 0.26, -0.83, 0.69, 0.45, -0.45, Material.AGED_BRASS);
         }
         if (p.torqueTier() > 0) {
-            box(pose, materials, -0.40, 0.15, 0.24, 0.40, 0.27, 0.38, Material.GEAR);
+            box(pose, materials, -0.38, 0.10, -0.18, 0.38, 0.25, 0.22, Material.GEAR);
         }
         if (p.drawgearTier() > 0) {
-            box(pose, materials, -0.17, 0.13, 0.80, 0.17, 0.29, 1.08, Material.STEEL_EDGE);
+            box(pose, materials, -0.15, 0.13, 1.08, 0.15, 0.31, 1.36, Material.STEEL_EDGE);
         }
         if (p.remoteTier() > 0) {
-            box(pose, materials, -0.04, 1.00, 0.41, 0.04, 1.20 + p.remoteTier() * 0.08,
-                    0.49, Material.COPPER);
-            box(pose, materials, -0.12, 1.18 + p.remoteTier() * 0.08, 0.38,
-                    0.12, 1.24 + p.remoteTier() * 0.08, 0.52,
+            box(pose, materials, -0.04, 1.15, 0.58, 0.04, 1.38 + p.remoteTier() * 0.08,
+                    0.66, Material.COPPER);
+            box(pose, materials, -0.12, 1.36 + p.remoteTier() * 0.08, 0.55,
+                    0.12, 1.42 + p.remoteTier() * 0.08, 0.69,
                     p.remoteTier() > 1 ? Material.VIOLET : Material.AMBER);
         }
         if (p.trestleTier() > 0) {
-            box(pose, materials, -0.66, 0.40, -0.16, -0.57, 0.67, 0.45, Material.TIMBER);
-            box(pose, materials, 0.57, 0.40, -0.16, 0.66, 0.67, 0.45, Material.TIMBER);
+            box(pose, materials, -0.69, 0.29, 0.24, -0.56, 0.62, 0.92, Material.TIMBER);
+            box(pose, materials, 0.56, 0.29, 0.24, 0.69, 0.62, 0.92, Material.TIMBER);
         }
     }
 
     private static void renderSearchlight(RailBeetleEntity beetle, PoseStack pose, MaterialBuffer materials) {
         if (!beetle.profile().searchlight()) return;
-        box(pose, materials, -0.17, 0.82, -0.48, 0.17, 1.06, -0.27, Material.AGED_BRASS);
+        box(pose, materials, -0.18, 0.45, -1.04, 0.18, 0.72, -0.92, Material.AGED_BRASS);
         box(pose, beetle.searchlightOn() ? materials.fullBright() : materials,
-                -0.12, 0.86, -0.495, 0.12, 1.02, -0.485,
+                -0.13, 0.50, -1.055, 0.13, 0.67, -1.045,
                 beetle.searchlightOn() ? Material.AMBER : Material.STEEL_EDGE);
     }
 

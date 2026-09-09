@@ -15,13 +15,13 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
     public RemoteBeetleScreen(RemoteBeetleMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
         imageWidth = 220;
-        imageHeight = 104;
+        imageHeight = 112;
     }
 
     @Override protected void init() {
         super.init();
         controls.clear();
-        int y = topPos + 53;
+        int y = topPos + 59;
         addControl(leftPos + 8, y, 27, "R", "screen.rail_beetle.reverse", BeetleControl.REVERSE);
         addControl(leftPos + 38, y, 27, "■", "screen.rail_beetle.stop", BeetleControl.STOP);
         addControl(leftPos + 68, y, 27, ".5×", "screen.rail_beetle.half", BeetleControl.HALF_SPEED);
@@ -47,11 +47,11 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
 
     @Override protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
         graphics.fill(leftPos, topPos, leftPos + imageWidth, topPos + imageHeight, 0xf0161a1d);
-        graphics.fill(leftPos + 5, topPos + 16, leftPos + imageWidth - 5, topPos + 47, 0xff252b30);
+        graphics.fill(leftPos + 5, topPos + 16, leftPos + imageWidth - 5, topPos + 53, 0xff252b30);
         int capacity = Math.max(1, menu.engineKind().builtIn() ? 1_600 : menu.engineKind().capacity());
         int fill = Math.min(196, (int) (196L * menu.engineResource() / capacity));
-        graphics.fill(leftPos + 12, topPos + 37, leftPos + 208, topPos + 43, 0xff0c0f11);
-        graphics.fill(leftPos + 12, topPos + 37, leftPos + 12 + fill, topPos + 43, 0xffd09a39);
+        graphics.fill(leftPos + 12, topPos + 45, leftPos + 208, topPos + 51, 0xff0c0f11);
+        graphics.fill(leftPos + 12, topPos + 45, leftPos + 12 + fill, topPos + 51, 0xffd09a39);
     }
 
     @Override protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -65,7 +65,7 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
                     10, 32, 0xff9faeb5, false);
         }
         graphics.drawString(font, Component.translatable("mode.rail_beetle." + menu.mode().name().toLowerCase(java.util.Locale.ROOT)),
-                10, 84, 0xff9faeb5, false);
+                10, 92, 0xff9faeb5, false);
     }
 
     @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {

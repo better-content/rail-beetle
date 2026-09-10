@@ -3,6 +3,7 @@ package com.bettercontent.railbeetle.entity;
 import com.bettercontent.railbeetle.RailBeetleConfig;
 import com.bettercontent.railbeetle.RailBeetleRegistries;
 import com.bettercontent.railbeetle.compat.CreateCompat;
+import com.bettercontent.railbeetle.compat.GoetySoulIntegration;
 import com.bettercontent.railbeetle.menu.RailBeetleMenu;
 import com.bettercontent.railbeetle.menu.RemoteBeetleMenu;
 import com.bettercontent.railbeetle.navigation.RouteProposal;
@@ -66,6 +67,7 @@ import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.energy.IEnergyStorage;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.network.NetworkHooks;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -78,7 +80,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.lang.reflect.Method;
 
 public final class RailBeetleEntity extends Minecart implements MenuProvider {
     public static final int INVENTORY_SIZE = 27;
@@ -1237,21 +1238,13 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
             player.displayClientMessage(Component.translatable("message.rail_beetle.engine.full"), true);
             return true;
         }
-        try {
-            Class<?> helper = Class.forName("com.Polarice3.Goety.utils.SEHelper");
-            Method get = helper.getMethod("getSESouls", Player.class);
-            Method decrease = helper.getMethod("decreaseSESouls", Player.class, int.class);
-            int moved = Math.min(room, (Integer) get.invoke(null, player));
-            if (moved <= 0 || !((Boolean) decrease.invoke(null, player, moved))) return false;
-            item.setResource(stack, item.resource(stack) + moved);
-            try { helper.getMethod("sendSEUpdatePacket", Player.class).invoke(null, player); }
-            catch (ReflectiveOperationException ignored) {}
-            player.displayClientMessage(Component.translatable("message.rail_beetle.engine.soul_transferred", moved), true);
-            syncStatus();
-            return true;
-        } catch (ReflectiveOperationException error) {
-            return false;
-        }
+        if (!ModList.get().isLoaded("goety")) return false;
+        int moved = GoetySoulIntegration.takeSouls(player, room);
+        if (moved <= 0) return false;
+        item.setResource(stack, item.resource(stack) + moved);
+        player.displayClientMessage(Component.translatable("message.rail_beetle.engine.soul_transferred", moved), true);
+        syncStatus();
+        return true;
     }
 
     @Override public Component getDisplayName() { return Component.translatable("entity.rail_beetle.rail_beetle"); }

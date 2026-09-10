@@ -66,6 +66,7 @@ dependencies {
     implementation(deobf("com.tterrag.registrate:Registrate:$registrateVersion"))
     implementation("io.github.llamalad7:mixinextras-forge:0.5.4")
     compileOnly(deobf("curse.maven:sodiumdynamiclights-551736:6044481"))
+    compileOnly(deobf("curse.maven:goety-586095:8087429"))
 
     runtimeOnly(deobf("curse.maven:citadel-331936:7476570"))
     runtimeOnly(deobf("curse.maven:alexs-caves-924854:5848216"))

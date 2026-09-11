@@ -1,7 +1,7 @@
 plugins {
     idea
     `java-library`
-    id("net.minecraftforge.gradle") version "[6.0.24,6.2)"
+    id("net.minecraftforge.gradle") version "6.0.54"
 }
 
 val minecraftVersion = property("minecraft_version") as String

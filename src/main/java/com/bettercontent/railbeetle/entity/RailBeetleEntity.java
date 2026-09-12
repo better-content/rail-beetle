@@ -35,6 +35,7 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
@@ -139,6 +140,9 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         }
         @Override protected void onContentsChanged(int slot) { machineryChanged(); }
     };
+    private UUID discoveryOperator;
+    private UUID discoveryOperation;
+    private EngineKind discoveryMotionEngine;
     private final Set<UUID> trackingPlayers = new HashSet<>();
     private final Map<UUID, Long> lastContextAction = new HashMap<>();
     private final Set<BlockPos> placedRouteRails = new HashSet<>();
@@ -293,6 +297,7 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
     }
 
     private void serverPreTick() {
+        discoveryMotionEngine = null;
         commandedFromRail = null;
         commandedNextRail = null;
         commandedHorizontalSpeed = 0;
@@ -342,6 +347,8 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         }
         if (mode == BeetleMode.DEPARTING && departureTicks > 0 && --departureTicks == 0) mode = BeetleMode.AUTO_BUILD;
         reconcileActiveProgress(rail);
+        if (discoveryMotionEngine != null && preTickPosition != null && position().distanceToSqr(preTickPosition) > 0.000001)
+            postDiscoveryWork(com.bettercontent.railbeetle.api.BeetleWorkEvent.Kind.MAGICAL_MOTION, discoveryMotionEngine.id());
         syncStatus();
     }
 
@@ -613,9 +620,11 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
     }
 
     private void finishRoute() {
+        boolean completedRoute = activeRoute != null && !placedRouteRails.isEmpty();
         setDeltaMovement(Vec3.ZERO);
         clearActiveRoute();
         mode = BeetleMode.COMPLETE;
+        if (completedRoute) postDiscoveryWork(com.bettercontent.railbeetle.api.BeetleWorkEvent.Kind.ROUTE_FINISHED, engineKind().id());
         applyAutomaticBrake(true);
         syncRoutes();
     }
@@ -629,12 +638,22 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         else applyAutomaticBrake(true);
     }
 
+    private void postDiscoveryWork(com.bettercontent.railbeetle.api.BeetleWorkEvent.Kind kind, String engineId) {
+        if (discoveryOperator == null || discoveryOperation == null || !(level() instanceof ServerLevel serverLevel)) return;
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(new com.bettercontent.railbeetle.api.BeetleWorkEvent(
+            serverLevel, discoveryOperator, getUUID(), discoveryOperation, kind, engineId));
+    }
+
     private boolean consumeWork(WorkAction action, int rawWork) {
         if (rawWork <= 0) return true;
         EngineKind kind = engineKind();
         int work = BeetlePower.adjustedWork(action, rawWork, profile(), kind);
         ItemStack engineStack = engine.getStackInSlot(0);
-        if (!engineStack.isEmpty() && BeetlePower.consumeEngine(engineStack, inventory, work)) return true;
+        if (!engineStack.isEmpty() && BeetlePower.consumeEngine(engineStack, inventory, work)) {
+            if (action == WorkAction.MOTION && (kind == EngineKind.SOURCE || kind == EngineKind.LIFEFORCE
+                    || kind == EngineKind.SOUL || kind == EngineKind.SPIRIT)) discoveryMotionEngine = kind;
+            return true;
+        }
         while (fuelTicks < work) {
             int refill = BeetleSupplies.takeFuel(inventory);
             if (refill <= 0) return false;
@@ -788,6 +807,8 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
             return false;
         }
         activeRoute = selected;
+        discoveryOperator = player.getUUID();
+        discoveryOperation = UUID.randomUUID();
         activeStep = 0;
         placedRouteRails.clear();
         proposals = List.of();
@@ -1333,6 +1354,8 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
     protected void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         tag.putInt("RailBeetleDataVersion", SAVE_VERSION);
+        if (discoveryOperator != null) tag.putUUID("DiscoveryOperator", discoveryOperator);
+        if (discoveryOperation != null) tag.putUUID("DiscoveryOperation", discoveryOperation);
         tag.put("Inventory", inventory.serializeNBT());
         tag.put("Engine", engine.serializeNBT());
         tag.put("Modules", modules.serializeNBT());
@@ -1352,6 +1375,8 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
     @Override
     protected void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
+        discoveryOperator = tag.hasUUID("DiscoveryOperator") ? tag.getUUID("DiscoveryOperator") : null;
+        discoveryOperation = tag.hasUUID("DiscoveryOperation") ? tag.getUUID("DiscoveryOperation") : null;
         inventory.deserializeNBT(tag.getCompound("Inventory"));
         engine.deserializeNBT(tag.getCompound("Engine"));
         modules.deserializeNBT(tag.getCompound("Modules"));

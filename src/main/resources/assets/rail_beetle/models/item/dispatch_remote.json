@@ -1,1 +1,1 @@
-{"parent":"rail_beetle:item/industrial_module","textures":{"accent":"minecraft:block/redstone_block"}}
+{"parent":"minecraft:item/generated","textures":{"layer0":"rail_beetle:item/dispatch_remote"}}

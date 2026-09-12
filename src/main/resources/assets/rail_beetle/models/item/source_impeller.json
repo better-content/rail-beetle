@@ -1,1 +1,1 @@
-{"parent":"rail_beetle:item/industrial_engine","textures":{"accent":"minecraft:block/amethyst_block"}}
+{"parent":"minecraft:item/generated","textures":{"layer0":"rail_beetle:item/source_impeller"}}

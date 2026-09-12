@@ -190,31 +190,33 @@ public final class RailBeetleRenderer extends EntityRenderer<RailBeetleEntity> {
         PoseStack.Pose last = pose.last();
         float x0 = (float) minX, y0 = (float) minY, z0 = (float) minZ;
         float x1 = (float) maxX, y1 = (float) maxY, z1 = (float) maxZ;
-        float u0 = material.u0(), v0 = material.v0(), u1 = material.u1(), v1 = material.v1();
+        UvRect front = material.uv(x1 - x0, y1 - y0);
+        UvRect side = material.uv(z1 - z0, y1 - y0);
+        UvRect top = material.uv(x1 - x0, z1 - z0);
 
         face(last, materials, x0, y1, z0, x1, y1, z0, x1, y0, z0, x0, y0, z0,
-                u0, v0, u1, v1, 0, 0, -1);
+                front, 0, 0, -1);
         face(last, materials, x1, y1, z1, x0, y1, z1, x0, y0, z1, x1, y0, z1,
-                u0, v0, u1, v1, 0, 0, 1);
+                front, 0, 0, 1);
         face(last, materials, x0, y1, z1, x0, y1, z0, x0, y0, z0, x0, y0, z1,
-                u0, v0, u1, v1, -1, 0, 0);
+                side, -1, 0, 0);
         face(last, materials, x1, y1, z0, x1, y1, z1, x1, y0, z1, x1, y0, z0,
-                u0, v0, u1, v1, 1, 0, 0);
+                side, 1, 0, 0);
         face(last, materials, x0, y1, z1, x1, y1, z1, x1, y1, z0, x0, y1, z0,
-                u0, v0, u1, v1, 0, 1, 0);
+                top, 0, 1, 0);
         face(last, materials, x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1,
-                u0, v0, u1, v1, 0, -1, 0);
+                top, 0, -1, 0);
     }
 
     private static void face(PoseStack.Pose pose, MaterialBuffer materials,
                              float ax, float ay, float az, float bx, float by, float bz,
                              float cx, float cy, float cz, float dx, float dy, float dz,
-                             float u0, float v0, float u1, float v1,
+                             UvRect uv,
                              float normalX, float normalY, float normalZ) {
-        vertex(pose, materials, ax, ay, az, u0, v0, normalX, normalY, normalZ);
-        vertex(pose, materials, bx, by, bz, u1, v0, normalX, normalY, normalZ);
-        vertex(pose, materials, cx, cy, cz, u1, v1, normalX, normalY, normalZ);
-        vertex(pose, materials, dx, dy, dz, u0, v1, normalX, normalY, normalZ);
+        vertex(pose, materials, ax, ay, az, uv.u0(), uv.v0(), normalX, normalY, normalZ);
+        vertex(pose, materials, bx, by, bz, uv.u1(), uv.v0(), normalX, normalY, normalZ);
+        vertex(pose, materials, cx, cy, cz, uv.u1(), uv.v1(), normalX, normalY, normalZ);
+        vertex(pose, materials, dx, dy, dz, uv.u0(), uv.v1(), normalX, normalY, normalZ);
     }
 
     private static void vertex(PoseStack.Pose pose, MaterialBuffer materials,
@@ -237,6 +239,15 @@ public final class RailBeetleRenderer extends EntityRenderer<RailBeetleEntity> {
         }
     }
 
+    private record UvRect(float u0, float v0, float u1, float v1) {}
+
+    static float fittedSpan(float side, float otherSide) {
+        if (side <= 0 || otherSide <= 0) {
+            throw new IllegalArgumentException("face dimensions must be positive");
+        }
+        return side / Math.max(side, otherSide);
+    }
+
     private enum Material {
         STEEL(0), STEEL_EDGE(1), AGED_BRASS(2), BRASS(3),
         COPPER(4), TIMBER(5), AMBER(6), RED(7),
@@ -255,6 +266,16 @@ public final class RailBeetleRenderer extends EntityRenderer<RailBeetleEntity> {
         private float v0() { return (index / 4) * TILE + INSET; }
         private float u1() { return (index % 4 + 1) * TILE - INSET; }
         private float v1() { return (index / 4 + 1) * TILE - INSET; }
+
+        private UvRect uv(float width, float height) {
+            float uCenter = (u0() + u1()) * 0.5f;
+            float vCenter = (v0() + v1()) * 0.5f;
+            float usable = TILE - 2.0f * INSET;
+            float uRadius = usable * fittedSpan(width, height) * 0.5f;
+            float vRadius = usable * fittedSpan(height, width) * 0.5f;
+            return new UvRect(uCenter - uRadius, vCenter - vRadius,
+                    uCenter + uRadius, vCenter + vRadius);
+        }
     }
 
     @Override public ResourceLocation getTextureLocation(RailBeetleEntity entity) { return TEXTURE; }

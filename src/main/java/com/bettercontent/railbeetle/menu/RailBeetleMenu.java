@@ -31,20 +31,20 @@ public final class RailBeetleMenu extends AbstractContainerMenu {
         this.beetle = beetle;
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < 9; column++) {
-                addSlot(new SlotItemHandler(beetle.inventory(), column + row * 9, 8 + column * 18, 18 + row * 18));
+                addSlot(new SlotItemHandler(beetle.inventory(), column + row * 9, 8 + column * 18, 22 + row * 18));
             }
         }
-        addSlot(new MachinerySlot(beetle.engineInventory(), 0, 184, 19));
+        addSlot(new MachinerySlot(beetle.engineInventory(), 0, 216, 20));
         for (int slot = 0; slot < RailBeetleEntity.MODULE_SLOTS; slot++) {
-            addSlot(new MachinerySlot(beetle.moduleInventory(), slot, 178 + (slot % 3) * 20, 42 + (slot / 3) * 20));
+            addSlot(new MachinerySlot(beetle.moduleInventory(), slot, 178 + (slot % 3) * 20, 52 + (slot / 3) * 20));
         }
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < 9; column++) {
-                addSlot(new Slot(playerInventory, column + row * 9 + 9, 8 + column * 18, 102 + row * 18));
+                addSlot(new Slot(playerInventory, column + row * 9 + 9, 8 + column * 18, 138 + row * 18));
             }
         }
         for (int column = 0; column < 9; column++) {
-            addSlot(new Slot(playerInventory, column, 8 + column * 18, 160));
+            addSlot(new Slot(playerInventory, column, 8 + column * 18, 196));
         }
     }
 

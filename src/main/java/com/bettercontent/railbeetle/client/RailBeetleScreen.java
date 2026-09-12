@@ -21,40 +21,38 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
 
     public RailBeetleScreen(RailBeetleMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
-        imageWidth = 280;
-        imageHeight = 184;
-        inventoryLabelY = 92;
+        imageWidth = 344;
+        imageHeight = 220;
+        inventoryLabelY = 126;
     }
 
     @Override
     protected void init() {
         super.init();
         controlButtons.clear();
-        int y = topPos + 74;
-        addControl(leftPos + 7, y, 22, Component.translatable("screen.rail_beetle.reverse.short"),
-                "screen.rail_beetle.reverse", BeetleControl.REVERSE);
-        addControl(leftPos + 31, y, 22, Component.translatable("screen.rail_beetle.stop.short"),
+        addControl(leftPos + 250, topPos + 22, 86, Component.translatable("screen.rail_beetle.stop.button"),
                 "screen.rail_beetle.stop", BeetleControl.STOP);
-        addControl(leftPos + 55, y, 22, Component.translatable("screen.rail_beetle.half.short"),
+        addControl(leftPos + 250, topPos + 43, 86, Component.translatable("screen.rail_beetle.reverse.button"),
+                "screen.rail_beetle.reverse", BeetleControl.REVERSE);
+        addControl(leftPos + 250, topPos + 79, 41, Component.translatable("screen.rail_beetle.half.button"),
                 "screen.rail_beetle.half", BeetleControl.HALF_SPEED);
-        addControl(leftPos + 79, y, 22, Component.translatable("screen.rail_beetle.normal.short"),
+        addControl(leftPos + 295, topPos + 79, 41, Component.translatable("screen.rail_beetle.normal.button"),
                 "screen.rail_beetle.normal", BeetleControl.NORMAL_SPEED);
-        addControl(leftPos + 103, y, 22, Component.translatable("screen.rail_beetle.double.short"),
+        addControl(leftPos + 250, topPos + 100, 41, Component.translatable("screen.rail_beetle.double.button"),
                 "screen.rail_beetle.double", BeetleControl.DOUBLE_SPEED);
-        addControl(leftPos + 127, y, 22, Component.translatable("screen.rail_beetle.triple.short"),
+        addControl(leftPos + 295, topPos + 100, 41, Component.translatable("screen.rail_beetle.triple.button"),
                 "screen.rail_beetle.triple", BeetleControl.TRIPLE_SPEED);
         doubleButton = controlButtons.get(controlButtons.size() - 2).button();
         tripleButton = controlButtons.get(controlButtons.size() - 1).button();
-        neutralButton = button(leftPos + 244, topPos + 18, 29, neutralLabel(), BeetleControl.TOGGLE_NEUTRAL);
-        neutralButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_beetle.neutral.tooltip")));
-        addRenderableWidget(neutralButton);
-        brakeButton = button(leftPos + 244, topPos + 42, 29, brakeLabel(), BeetleControl.TOGGLE_HAND_BRAKE);
-        brakeButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_beetle.brake.tooltip")));
-        addRenderableWidget(brakeButton);
-        lightButton = button(leftPos + 151, y, 20, Component.translatable("screen.rail_beetle.searchlight.short"),
-                BeetleControl.TOGGLE_SEARCHLIGHT);
+        lightButton = button(leftPos + 250, topPos + 124, 86, lightLabel(), BeetleControl.TOGGLE_SEARCHLIGHT);
         lightButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_beetle.searchlight")));
         addRenderableWidget(lightButton);
+        neutralButton = button(leftPos + 250, topPos + 145, 86, neutralLabel(), BeetleControl.TOGGLE_NEUTRAL);
+        neutralButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_beetle.neutral.tooltip")));
+        addRenderableWidget(neutralButton);
+        brakeButton = button(leftPos + 250, topPos + 166, 86, brakeLabel(), BeetleControl.TOGGLE_HAND_BRAKE);
+        brakeButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_beetle.brake.tooltip")));
+        addRenderableWidget(brakeButton);
     }
 
     @Override
@@ -65,21 +63,25 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
         doubleButton.active = menu.beetle().profile().governorTier() >= 1;
         tripleButton.active = menu.beetle().profile().governorTier() >= 2;
         lightButton.active = menu.beetle().profile().searchlight();
-        lightButton.setMessage(Component.translatable(menu.beetle().searchlightOn()
-                ? "screen.rail_beetle.searchlight.on" : "screen.rail_beetle.searchlight.off"));
+        lightButton.setMessage(lightLabel());
     }
 
     private Component brakeLabel() {
         RailBeetleEntity beetle = menu.beetle();
         return Component.translatable(beetle.forcedBrake()
-                ? "screen.rail_beetle.brake.locked"
-                : beetle.brakeApplied() ? "screen.rail_beetle.brake.auto_on" : "screen.rail_beetle.brake.auto_off");
+                ? "screen.rail_beetle.brake.on"
+                : "screen.rail_beetle.brake.auto");
     }
 
     private Component neutralLabel() {
         return Component.translatable(menu.beetle().neutral()
                 ? "screen.rail_beetle.neutral.on"
                 : "screen.rail_beetle.neutral.off");
+    }
+
+    private Component lightLabel() {
+        return Component.translatable(menu.beetle().searchlightOn()
+                ? "screen.rail_beetle.searchlight.on" : "screen.rail_beetle.searchlight.off");
     }
 
     private Button button(int x, int y, int width, Component label, BeetleControl action) {
@@ -97,10 +99,11 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
     @Override
     protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
         graphics.fill(leftPos, topPos, leftPos + imageWidth, topPos + imageHeight, 0xee161a1d);
-        graphics.fill(leftPos + 5, topPos + 15, leftPos + 171, topPos + 73, 0xff252b30);
-        graphics.fill(leftPos + 5, topPos + 99, leftPos + 171, topPos + 179, 0xff252b30);
-        graphics.fill(leftPos + 174, topPos + 15, leftPos + 239, topPos + 73, 0xff252b30);
-        graphics.fill(leftPos + 241, topPos + 15, leftPos + 276, topPos + 73, 0xff252b30);
+        graphics.fill(leftPos + 5, topPos + 16, leftPos + 171, topPos + 78, 0xff252b30);
+        graphics.fill(leftPos + 5, topPos + 132, leftPos + 171, topPos + 215, 0xff252b30);
+        graphics.fill(leftPos + 174, topPos + 16, leftPos + 242, topPos + 94, 0xff252b30);
+        graphics.fill(leftPos + 174, topPos + 98, leftPos + 242, topPos + 215, 0xff252b30);
+        graphics.fill(leftPos + 246, topPos + 16, leftPos + 340, topPos + 215, 0xff252b30);
         for (int slot = 0; slot < menu.slots.size(); slot++) {
             var value = menu.slots.get(slot);
             graphics.fill(leftPos + value.x - 1, topPos + value.y - 1,
@@ -111,10 +114,10 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
         RailBeetleEntity beetle = menu.beetle();
         int capacity = Math.max(1, beetle.engineKind().builtIn() ? 1_600 : beetle.engineKind().capacity());
         int fill = Math.min(56, (int) (56L * beetle.engineResource() / capacity));
-        graphics.fill(leftPos + 178, topPos + 67, leftPos + 236, topPos + 71, 0xff0b0e10);
-        graphics.fill(leftPos + 179, topPos + 68, leftPos + 179 + fill, topPos + 70, 0xffd39b39);
+        graphics.fill(leftPos + 178, topPos + 89, leftPos + 238, topPos + 93, 0xff0b0e10);
+        graphics.fill(leftPos + 179, topPos + 90, leftPos + 179 + fill, topPos + 92, 0xffd39b39);
         if (!beetle.canConfigureMachinery()) {
-            graphics.fill(leftPos + 174, topPos + 15, leftPos + 239, topPos + 73, 0x99301818);
+            graphics.fill(leftPos + 174, topPos + 16, leftPos + 242, topPos + 94, 0x99301818);
         }
     }
 
@@ -122,19 +125,40 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
     protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
         RailBeetleEntity beetle = menu.beetle();
         graphics.drawString(font, title, titleLabelX, titleLabelY, 0xe8f5f8, false);
-        Component supplies = beetle.engineKind().builtIn()
-                ? Component.translatable("screen.rail_beetle.supplies", beetle.railCount(), beetle.supportCount(),
-                    com.bettercontent.railbeetle.upgrade.EngineKind.compactAmount(beetle.engineResource()),
-                    beetle.engineKind().unit())
-                : Component.translatable("screen.rail_beetle.supplies.alt", beetle.railCount(), beetle.supportCount(),
-                    com.bettercontent.railbeetle.upgrade.EngineKind.compactAmount(beetle.engineResource()),
-                    beetle.engineKind().unit(), beetle.fallbackFuel());
-        graphics.drawString(font, supplies, 169 - font.width(supplies), titleLabelY, 0xbddce5, false);
+        Component cargo = Component.translatable("screen.rail_beetle.cargo");
+        graphics.drawString(font, cargo, 169 - font.width(cargo), titleLabelY, 0xffc6a96e, false);
+        Component supplies = Component.translatable("screen.rail_beetle.supplies",
+                beetle.railCount(), beetle.supportCount());
+        graphics.drawString(font, supplies, 8, 82, 0xbddce5, false);
+        Component power = Component.translatable("screen.rail_beetle.power",
+                com.bettercontent.railbeetle.upgrade.EngineKind.compactAmount(beetle.engineResource()),
+                beetle.engineKind().unit());
+        graphics.drawString(font, power, 8, 93, 0xbddce5, false);
+        if (!beetle.engineKind().builtIn()) {
+            graphics.drawString(font, Component.translatable("screen.rail_beetle.fallback", beetle.fallbackFuel()),
+                    8, 104, 0xff9faeb5, false);
+        }
         boolean configurable = beetle.canConfigureMachinery();
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.machinery"), 177, 6, 0xffd6aa5b, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.engine"), 177, 24, 0xffc6a96e, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.modules"), 177, 42, 0xffc6a96e, false);
         graphics.drawString(font, Component.translatable(configurable
-                ? "screen.rail_beetle.engine" : "screen.rail_beetle.machinery_locked.short"),
-                177, 6, configurable ? 0xffd6aa5b : 0xffff8f84, false);
-        graphics.drawString(font, Component.translatable("screen.rail_beetle.modules"), 177, 31, 0xffc6a96e, false);
+                ? "screen.rail_beetle.machinery_ready" : "screen.rail_beetle.machinery_locked"),
+                178, 101, configurable ? 0xff8fdb9b : 0xffff8f84, false);
+        graphics.drawString(font, Component.translatable(configurable
+                ? "screen.rail_beetle.machinery_ready.help.one" : "screen.rail_beetle.machinery_locked.help.one"),
+                178, 112, 0xffcbd2d6, false);
+        graphics.drawString(font, Component.translatable(configurable
+                ? "screen.rail_beetle.machinery_ready.help.two" : "screen.rail_beetle.machinery_locked.help.two"),
+                178, 123, 0xffcbd2d6, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.controls"), 250, 6, 0xffd6aa5b, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.forward_speed"), 250, 68, 0xffc6a96e, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.current_mode"), 250, 190, 0xffc6a96e, false);
+        var modeLines = font.split(Component.translatable("mode.rail_beetle." +
+                beetle.mode().name().toLowerCase(java.util.Locale.ROOT)), 86);
+        for (int line = 0; line < Math.min(2, modeLines.size()); line++) {
+            graphics.drawString(font, modeLines.get(line), 250, 201 + line * 10, 0xffe8f5f8, false);
+        }
         graphics.drawString(font, playerInventoryTitle, inventoryLabelX, inventoryLabelY, 0xcbd2d6, false);
     }
 
@@ -157,7 +181,7 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
         RailBeetleEntity beetle = menu.beetle();
         return switch (control) {
             case REVERSE -> beetle.mode().name().equals("MANUAL_REVERSE");
-            case STOP -> !beetle.mode().moves();
+            case STOP -> !beetle.mode().moves() && !beetle.neutral();
             case HALF_SPEED -> beetle.mode().moves() && beetle.speedTier().name().equals("HALF");
             case NORMAL_SPEED -> beetle.mode().moves() && beetle.speedTier().name().equals("NORMAL");
             case DOUBLE_SPEED -> beetle.mode().moves() && beetle.speedTier().name().equals("DOUBLE");

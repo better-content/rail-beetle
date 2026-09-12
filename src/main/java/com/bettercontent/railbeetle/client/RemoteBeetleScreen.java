@@ -14,25 +14,32 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
     private final java.util.Map<BeetleControl, Button> controls = new java.util.EnumMap<>(BeetleControl.class);
     public RemoteBeetleScreen(RemoteBeetleMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
-        imageWidth = 220;
-        imageHeight = 112;
+        imageWidth = 300;
+        imageHeight = 148;
     }
 
     @Override protected void init() {
         super.init();
         controls.clear();
-        int y = topPos + 59;
-        addControl(leftPos + 8, y, 27, "R", "screen.rail_beetle.reverse", BeetleControl.REVERSE);
-        addControl(leftPos + 38, y, 27, "■", "screen.rail_beetle.stop", BeetleControl.STOP);
-        addControl(leftPos + 68, y, 27, ".5×", "screen.rail_beetle.half", BeetleControl.HALF_SPEED);
-        addControl(leftPos + 98, y, 27, "1×", "screen.rail_beetle.normal", BeetleControl.NORMAL_SPEED);
-        addControl(leftPos + 128, y, 27, "2×", "screen.rail_beetle.double", BeetleControl.DOUBLE_SPEED);
-        addControl(leftPos + 158, y, 27, "3×", "screen.rail_beetle.triple", BeetleControl.TRIPLE_SPEED);
-        addControl(leftPos + 188, y, 24, "☼", "screen.rail_beetle.searchlight", BeetleControl.TOGGLE_SEARCHLIGHT);
+        addControl(leftPos + 8, topPos + 71, 68, "screen.rail_beetle.stop.button",
+                "screen.rail_beetle.stop", BeetleControl.STOP);
+        addControl(leftPos + 80, topPos + 71, 68, "screen.rail_beetle.reverse.button",
+                "screen.rail_beetle.reverse", BeetleControl.REVERSE);
+        addControl(leftPos + 152, topPos + 71, 140, lightLabelKey(),
+                "screen.rail_beetle.searchlight", BeetleControl.TOGGLE_SEARCHLIGHT);
+        addControl(leftPos + 8, topPos + 105, 68, "screen.rail_beetle.half.button",
+                "screen.rail_beetle.half", BeetleControl.HALF_SPEED);
+        addControl(leftPos + 80, topPos + 105, 68, "screen.rail_beetle.normal.button",
+                "screen.rail_beetle.normal", BeetleControl.NORMAL_SPEED);
+        addControl(leftPos + 152, topPos + 105, 68, "screen.rail_beetle.double.button",
+                "screen.rail_beetle.double", BeetleControl.DOUBLE_SPEED);
+        addControl(leftPos + 224, topPos + 105, 68, "screen.rail_beetle.triple.button",
+                "screen.rail_beetle.triple", BeetleControl.TRIPLE_SPEED);
     }
 
-    private void addControl(int x, int y, int width, String label, String tooltip, BeetleControl action) {
-        Button button = Button.builder(Component.literal(label), ignored -> RailBeetleNetwork.control(menu.entityId(), action))
+    private void addControl(int x, int y, int width, String labelKey, String tooltip, BeetleControl action) {
+        Button button = Button.builder(Component.translatable(labelKey),
+                        ignored -> RailBeetleNetwork.control(menu.entityId(), action))
                 .bounds(x, y, width, 18).tooltip(Tooltip.create(Component.translatable(tooltip))).build();
         controls.put(action, button);
         addRenderableWidget(button);
@@ -43,20 +50,26 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
         controls.get(BeetleControl.DOUBLE_SPEED).active = menu.profile().governorTier() >= 1;
         controls.get(BeetleControl.TRIPLE_SPEED).active = menu.profile().governorTier() >= 2;
         controls.get(BeetleControl.TOGGLE_SEARCHLIGHT).active = menu.profile().searchlight();
+        controls.get(BeetleControl.TOGGLE_SEARCHLIGHT).setMessage(Component.translatable(lightLabelKey()));
+    }
+
+    private String lightLabelKey() {
+        return menu.searchlightOn() ? "screen.rail_beetle.searchlight.on" : "screen.rail_beetle.searchlight.off";
     }
 
     @Override protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
         graphics.fill(leftPos, topPos, leftPos + imageWidth, topPos + imageHeight, 0xf0161a1d);
-        graphics.fill(leftPos + 5, topPos + 16, leftPos + imageWidth - 5, topPos + 53, 0xff252b30);
+        graphics.fill(leftPos + 5, topPos + 16, leftPos + imageWidth - 5, topPos + 58, 0xff252b30);
+        graphics.fill(leftPos + 5, topPos + 65, leftPos + imageWidth - 5, topPos + 133, 0xff252b30);
         int capacity = Math.max(1, menu.engineKind().builtIn() ? 1_600 : menu.engineKind().capacity());
-        int fill = Math.min(196, (int) (196L * menu.engineResource() / capacity));
-        graphics.fill(leftPos + 12, topPos + 45, leftPos + 208, topPos + 51, 0xff0c0f11);
-        graphics.fill(leftPos + 12, topPos + 45, leftPos + 12 + fill, topPos + 51, 0xffd09a39);
+        int fill = Math.min(276, (int) (276L * menu.engineResource() / capacity));
+        graphics.fill(leftPos + 12, topPos + 48, leftPos + 288, topPos + 54, 0xff0c0f11);
+        graphics.fill(leftPos + 12, topPos + 48, leftPos + 12 + fill, topPos + 54, 0xffd09a39);
     }
 
     @Override protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
         graphics.drawString(font, title, 8, 6, 0xffe8f5f8, false);
-        Component status = Component.translatable("screen.rail_beetle.remote.status",
+        Component status = Component.translatable("screen.rail_beetle.remote.power",
                 Component.translatable("engine.rail_beetle." + menu.engineKind().id()),
                 com.bettercontent.railbeetle.upgrade.EngineKind.compactAmount(menu.engineResource()), menu.engineKind().unit());
         graphics.drawString(font, status, 10, 22, 0xffcbd2d6, false);
@@ -64,8 +77,13 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
             graphics.drawString(font, Component.translatable("screen.rail_beetle.fallback", menu.fallbackFuel()),
                     10, 32, 0xff9faeb5, false);
         }
-        graphics.drawString(font, Component.translatable("mode.rail_beetle." + menu.mode().name().toLowerCase(java.util.Locale.ROOT)),
-                10, 92, 0xff9faeb5, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.choose_command"),
+                9, 62, 0xffd6aa5b, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.forward_speed"),
+                9, 95, 0xffc6a96e, false);
+        Component mode = Component.translatable("screen.rail_beetle.remote.current_mode",
+                Component.translatable("mode.rail_beetle." + menu.mode().name().toLowerCase(java.util.Locale.ROOT)));
+        graphics.drawString(font, mode, 9, 136, 0xffe8f5f8, false);
     }
 
     @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
@@ -83,7 +101,7 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
     private boolean selected(BeetleControl action) {
         return switch (action) {
             case REVERSE -> menu.mode().name().equals("MANUAL_REVERSE");
-            case STOP -> !menu.mode().moves();
+            case STOP -> !menu.mode().moves() && !menu.mode().name().equals("NEUTRAL");
             case HALF_SPEED -> menu.mode().moves() && menu.speedTier().name().equals("HALF");
             case NORMAL_SPEED -> menu.mode().moves() && menu.speedTier().name().equals("NORMAL");
             case DOUBLE_SPEED -> menu.mode().moves() && menu.speedTier().name().equals("DOUBLE");

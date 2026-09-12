@@ -12,6 +12,8 @@ val flywheelVersion = property("flywheel_version") as String
 val registrateVersion = property("registrate_version") as String
 val modId = property("mod_id") as String
 val modVersion = property("mod_version") as String
+val includeCaveIntegrationRuntime = providers.gradleProperty("includeCaveIntegrationRuntime")
+    .map(String::toBoolean).orElse(true)
 val unitTestRuntime by configurations.creating
 
 group = property("mod_group") as String
@@ -26,6 +28,13 @@ java {
     withSourcesJar()
 }
 
+val visualHarness by sourceSets.creating {
+    compileClasspath += sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().output
+}
+configurations[visualHarness.implementationConfigurationName].extendsFrom(configurations.implementation.get())
+configurations[visualHarness.runtimeOnlyConfigurationName].extendsFrom(configurations.runtimeOnly.get())
+
 minecraft {
     mappings("official", minecraftVersion)
     copyIdeResources = true
@@ -33,18 +42,29 @@ minecraft {
         configureEach {
             workingDirectory(project.file("run"))
             property("forge.logging.console.level", "info")
+            property("mixin.env.remapRefMap", "true")
+            property("mixin.env.refMapRemappingFile", file("build/createSrgToMcp/output.srg").absolutePath)
             mods { create(modId) { source(sourceSets.main.get()) } }
         }
-        create("client")
-        create("server") { arg("--nogui") }
+        val baseClient = create("client")
+        val baseServer = create("server") { arg("--nogui") }
         create("gameTestServer") {
             workingDirectory(project.file("run-gametest"))
             property("forge.enableGameTest", "true")
             property("forge.gameTestServer", "true")
             property("forge.enabledGameTestNamespaces", modId)
-            property("mixin.env.remapRefMap", "true")
-            property("mixin.env.refMapRemappingFile", file("build/createSrgToMcp/output.srg").absolutePath)
             arg("--nogui")
+        }
+        create("visualServer") {
+            parent(baseServer)
+            workingDirectory(project.file("run-visual-server"))
+            mods { create("rail_beetle_visual_harness") { source(visualHarness) } }
+        }
+        create("visualClient") {
+            parent(baseClient)
+            workingDirectory(project.file("run-visual-client"))
+            args("--quickPlayMultiplayer", "127.0.0.1:25565", "--width", "1280", "--height", "720")
+            mods { create("rail_beetle_visual_harness") { source(visualHarness) } }
         }
     }
 }
@@ -68,10 +88,12 @@ dependencies {
     compileOnly(deobf("curse.maven:sodiumdynamiclights-551736:6044481"))
     compileOnly(deobf("curse.maven:goety-586095:8087429"))
 
-    runtimeOnly(deobf("curse.maven:citadel-331936:7476570"))
-    runtimeOnly(deobf("curse.maven:alexs-caves-924854:5848216"))
-    runtimeOnly(deobf("curse.maven:yungs-api-421850:5769971"))
-    runtimeOnly(deobf("curse.maven:yungs-better-caves-340583:8686226"))
+    if (includeCaveIntegrationRuntime.get()) {
+        runtimeOnly(deobf("curse.maven:citadel-331936:7476570"))
+        runtimeOnly(deobf("curse.maven:alexs-caves-924854:5848216"))
+        runtimeOnly(deobf("curse.maven:yungs-api-421850:5769971"))
+        runtimeOnly(deobf("curse.maven:yungs-better-caves-340583:8686226"))
+    }
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     unitTestRuntime("org.junit.jupiter:junit-jupiter-engine:5.10.2")
@@ -93,6 +115,10 @@ tasks.processResources {
 }
 
 tasks.withType<JavaCompile>().configureEach { options.release.set(17) }
+tasks.named("compileVisualHarnessJava") { dependsOn(tasks.named("classes")) }
+tasks.withType<JavaExec>().configureEach {
+    if (name == "runVisualServer") standardInput = System.`in`
+}
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     // Deterministic unit tests do not need the heavyweight cave-integration runtime.
@@ -118,6 +144,14 @@ val syncGameTestStructures by tasks.registering(Sync::class) {
 }
 tasks.matching { it.name.startsWith("prepareRunGameTestServer") }.configureEach {
     dependsOn(cleanGameTestWorld, syncGameTestStructures)
+}
+
+val syncVisualHarnessOptions by tasks.registering(Copy::class) {
+    from(layout.projectDirectory.file("src/visualHarness/options.txt"))
+    into(layout.projectDirectory.dir("run-visual-client"))
+}
+tasks.matching { it.name.startsWith("prepareRunVisualClient") }.configureEach {
+    dependsOn(syncVisualHarnessOptions)
 }
 
 tasks.named("assemble") { dependsOn(stageRuntimeJar) }

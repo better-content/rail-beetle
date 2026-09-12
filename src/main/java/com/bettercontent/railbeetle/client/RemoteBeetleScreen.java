@@ -15,7 +15,7 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
     public RemoteBeetleScreen(RemoteBeetleMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
         imageWidth = 300;
-        imageHeight = 148;
+        imageHeight = 163;
     }
 
     @Override protected void init() {
@@ -60,7 +60,7 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
     @Override protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
         graphics.fill(leftPos, topPos, leftPos + imageWidth, topPos + imageHeight, 0xf0161a1d);
         graphics.fill(leftPos + 5, topPos + 16, leftPos + imageWidth - 5, topPos + 58, 0xff252b30);
-        graphics.fill(leftPos + 5, topPos + 65, leftPos + imageWidth - 5, topPos + 133, 0xff252b30);
+        graphics.fill(leftPos + 5, topPos + 65, leftPos + imageWidth - 5, topPos + 144, 0xff252b30);
         int capacity = Math.max(1, menu.engineKind().builtIn() ? 1_600 : menu.engineKind().capacity());
         int fill = Math.min(276, (int) (276L * menu.engineResource() / capacity));
         graphics.fill(leftPos + 12, topPos + 48, leftPos + 288, topPos + 54, 0xff0c0f11);
@@ -81,9 +81,11 @@ public final class RemoteBeetleScreen extends AbstractContainerScreen<RemoteBeet
                 9, 62, 0xffd6aa5b, false);
         graphics.drawString(font, Component.translatable("screen.rail_beetle.forward_speed"),
                 9, 95, 0xffc6a96e, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.remote.governor_hint"),
+                9, 129, 0xff9faeb5, false);
         Component mode = Component.translatable("screen.rail_beetle.remote.current_mode",
                 Component.translatable("mode.rail_beetle." + menu.mode().name().toLowerCase(java.util.Locale.ROOT)));
-        graphics.drawString(font, mode, 9, 136, 0xffe8f5f8, false);
+        graphics.drawString(font, mode, 9, 151, 0xffe8f5f8, false);
     }
 
     @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {

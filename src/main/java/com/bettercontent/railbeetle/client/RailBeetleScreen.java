@@ -22,7 +22,7 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
     public RailBeetleScreen(RailBeetleMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
         imageWidth = 344;
-        imageHeight = 220;
+        imageHeight = 246;
         inventoryLabelY = 126;
     }
 
@@ -44,13 +44,13 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
                 "screen.rail_beetle.triple", BeetleControl.TRIPLE_SPEED);
         doubleButton = controlButtons.get(controlButtons.size() - 2).button();
         tripleButton = controlButtons.get(controlButtons.size() - 1).button();
-        lightButton = button(leftPos + 250, topPos + 124, 86, lightLabel(), BeetleControl.TOGGLE_SEARCHLIGHT);
+        lightButton = button(leftPos + 250, topPos + 147, 86, lightLabel(), BeetleControl.TOGGLE_SEARCHLIGHT);
         lightButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_beetle.searchlight")));
         addRenderableWidget(lightButton);
-        neutralButton = button(leftPos + 250, topPos + 145, 86, neutralLabel(), BeetleControl.TOGGLE_NEUTRAL);
+        neutralButton = button(leftPos + 250, topPos + 168, 86, neutralLabel(), BeetleControl.TOGGLE_NEUTRAL);
         neutralButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_beetle.neutral.tooltip")));
         addRenderableWidget(neutralButton);
-        brakeButton = button(leftPos + 250, topPos + 166, 86, brakeLabel(), BeetleControl.TOGGLE_HAND_BRAKE);
+        brakeButton = button(leftPos + 250, topPos + 189, 86, brakeLabel(), BeetleControl.TOGGLE_HAND_BRAKE);
         brakeButton.setTooltip(Tooltip.create(Component.translatable("screen.rail_beetle.brake.tooltip")));
         addRenderableWidget(brakeButton);
     }
@@ -100,10 +100,10 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
     protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
         graphics.fill(leftPos, topPos, leftPos + imageWidth, topPos + imageHeight, 0xee161a1d);
         graphics.fill(leftPos + 5, topPos + 16, leftPos + 171, topPos + 78, 0xff252b30);
-        graphics.fill(leftPos + 5, topPos + 132, leftPos + 171, topPos + 215, 0xff252b30);
+        graphics.fill(leftPos + 5, topPos + 132, leftPos + 171, topPos + 241, 0xff252b30);
         graphics.fill(leftPos + 174, topPos + 16, leftPos + 242, topPos + 94, 0xff252b30);
-        graphics.fill(leftPos + 174, topPos + 98, leftPos + 242, topPos + 215, 0xff252b30);
-        graphics.fill(leftPos + 246, topPos + 16, leftPos + 340, topPos + 215, 0xff252b30);
+        graphics.fill(leftPos + 174, topPos + 98, leftPos + 242, topPos + 241, 0xff252b30);
+        graphics.fill(leftPos + 246, topPos + 16, leftPos + 340, topPos + 241, 0xff252b30);
         for (int slot = 0; slot < menu.slots.size(); slot++) {
             var value = menu.slots.get(slot);
             graphics.fill(leftPos + value.x - 1, topPos + value.y - 1,
@@ -153,11 +153,13 @@ public final class RailBeetleScreen extends AbstractContainerScreen<RailBeetleMe
                 178, 123, 0xffcbd2d6, false);
         graphics.drawString(font, Component.translatable("screen.rail_beetle.controls"), 250, 6, 0xffd6aa5b, false);
         graphics.drawString(font, Component.translatable("screen.rail_beetle.forward_speed"), 250, 68, 0xffc6a96e, false);
-        graphics.drawString(font, Component.translatable("screen.rail_beetle.current_mode"), 250, 190, 0xffc6a96e, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.governor_hint.one"), 250, 122, 0xff9faeb5, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.governor_hint.two"), 250, 132, 0xff9faeb5, false);
+        graphics.drawString(font, Component.translatable("screen.rail_beetle.current_mode"), 250, 212, 0xffc6a96e, false);
         var modeLines = font.split(Component.translatable("mode.rail_beetle." +
                 beetle.mode().name().toLowerCase(java.util.Locale.ROOT)), 86);
         for (int line = 0; line < Math.min(2, modeLines.size()); line++) {
-            graphics.drawString(font, modeLines.get(line), 250, 201 + line * 10, 0xffe8f5f8, false);
+            graphics.drawString(font, modeLines.get(line), 250, 223 + line * 10, 0xffe8f5f8, false);
         }
         graphics.drawString(font, playerInventoryTitle, inventoryLabelX, inventoryLabelY, 0xcbd2d6, false);
     }

@@ -76,3 +76,30 @@ Validation:
 ./gradlew verifyFast
 ./gradlew verifyFull
 ```
+
+## Minimal visual harness
+
+The development-only visual harness opens the production Rail Beetle screens
+without launching the Better Content modpack. Start these in separate terminals:
+
+```sh
+./gradlew runVisualServer -PincludeCaveIntegrationRuntime=false
+./gradlew runVisualClient -PincludeCaveIntegrationRuntime=false
+```
+
+After the client joins as `Dev`, enter one of these commands in the server
+terminal. The harness creates the requested state, opens the real menu, and
+writes a 1280×720 image to `run-visual-client/screenshots/`:
+
+```text
+rbvisual main Dev baseline main-baseline
+rbvisual main Dev upgraded main-upgraded
+rbvisual main Dev locked main-service-locked
+rbvisual remote Dev baseline remote-baseline
+rbvisual remote Dev upgraded remote-upgraded
+```
+
+`baseline` uses the built-in firebox and no optional drive upgrades; a remote
+baseline adds only the receiver required to open that screen. `upgraded` fills
+the engine and module slots, while `locked` puts the machinery bays into their
+in-use lock state.

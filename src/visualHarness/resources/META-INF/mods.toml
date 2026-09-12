@@ -1,0 +1,16 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="rail_beetle_visual_harness"
+version="1"
+displayName="Rail Beetle Visual Harness"
+description='''Non-shipping console-driven GUI screenshot companion.'''
+
+[[dependencies.rail_beetle_visual_harness]]
+modId="rail_beetle"
+mandatory=true
+versionRange="[0.1.0,)"
+ordering="AFTER"
+side="BOTH"

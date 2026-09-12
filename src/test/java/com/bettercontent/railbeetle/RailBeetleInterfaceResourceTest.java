@@ -30,7 +30,10 @@ final class RailBeetleInterfaceResourceTest {
                 "screen.rail_beetle.machinery_ready.help.one",
                 "screen.rail_beetle.machinery_ready.help.two",
                 "screen.rail_beetle.current_mode",
-                "screen.rail_beetle.remote.current_mode"
+                "screen.rail_beetle.remote.current_mode",
+                "screen.rail_beetle.governor_hint.one",
+                "screen.rail_beetle.governor_hint.two",
+                "screen.rail_beetle.remote.governor_hint"
         }) {
             assertTrue(lang.contains("\"" + key + "\""), "missing explanatory UI copy: " + key);
         }

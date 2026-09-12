@@ -14,10 +14,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class RailBeetleVisualAssetTest {
-    @Test void rectangularFacesPreserveTheMaterialTextureAspectRatio() {
-        assertEquals(1.0f, RailBeetleRenderer.fittedSpan(4, 2));
-        assertEquals(0.5f, RailBeetleRenderer.fittedSpan(2, 4));
-        assertEquals(1.0f, RailBeetleRenderer.fittedSpan(3, 3));
+    @Test void entityMaterialAtlasMatchesItsSquareFourByFourMapping() throws IOException {
+        try (var stream = getClass().getResourceAsStream(
+                "/assets/rail_beetle/textures/entity/rail_beetle.png")) {
+            assertNotNull(stream, "missing Rail Beetle entity texture atlas");
+            var image = ImageIO.read(stream);
+            assertNotNull(image, "unreadable Rail Beetle entity texture atlas");
+            assertEquals(image.getWidth(), image.getHeight(), "material atlas must be square");
+            assertEquals(0, image.getWidth() % 4, "atlas must divide into four equal columns");
+            assertEquals(image.getWidth() / 4, image.getHeight() / 4,
+                    "mapped material cells must be square, not rescaled rectangles");
+        }
     }
 
     @Test void everyNonBlockItemUsesItsOwnSixteenPixelInventoryIcon() throws IOException {

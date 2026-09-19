@@ -284,8 +284,12 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
     }
 
     @Nullable public RouteBlocker routeBlocker() {
-        if (activeRoute == null || activeStep >= activeRoute.steps().size()) return null;
-        RouteStep step = activeRoute.steps().get(activeStep);
+        return routeBlocker(activeStep);
+    }
+
+    @Nullable private RouteBlocker routeBlocker(int stepIndex) {
+        if (activeRoute == null || stepIndex < 0 || stepIndex >= activeRoute.steps().size()) return null;
+        RouteStep step = activeRoute.steps().get(stepIndex);
         BlockPos pos = step.railPos();
         if (!level().isLoaded(pos) || !level().isLoaded(pos.above()) || !level().isLoaded(pos.below())) {
             return new RouteBlocker(pos, RouteBlocker.Kind.UNLOADED_TERRAIN, RouteBlocker.Action.MOVE_CLOSER);
@@ -495,6 +499,13 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         int safetyLookAhead = Math.max(4, (int) Math.ceil(stoppingDistance() + 2));
         int lookAhead = Math.min(activeRoute.steps().size(), activeStep + safetyLookAhead);
         for (int index = activeStep; index < lookAhead; index++) {
+            RouteBlocker blocker = routeBlocker(index);
+            if (blocker != null) {
+                notifyRouteBlocker(blocker);
+                if (blocker.kind() == RouteBlocker.Kind.GEOMETRY) invalidateRoute();
+                else pause();
+                return false;
+            }
             if (!ensureStepPlaced(index)) return false;
         }
         if (activeStep >= activeRoute.steps().size()) {
@@ -1234,9 +1245,17 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
     }
 
     private void notifyTrackingPlayers(String translationKey) {
+        notifyTrackingPlayers(Component.translatable(translationKey));
+    }
+
+    private void notifyRouteBlocker(RouteBlocker blocker) {
+        notifyTrackingPlayers(Component.translatable(blocker.messageKey(), blocker.position().toShortString()));
+    }
+
+    private void notifyTrackingPlayers(Component message) {
         for (Player player : level().players()) {
             if (player.distanceToSqr(this) <= 128.0 * 128.0) {
-                player.displayClientMessage(Component.translatable(translationKey), true);
+                player.displayClientMessage(message, true);
             }
         }
     }

@@ -41,6 +41,16 @@ final class RailBeetleInterfaceResourceTest {
         assertTrue(lang.contains("Free-roll clears the active route"), "free-roll must explain its side effects");
     }
 
+    @Test void routeBlockerMessagesNameLocationAndNextAction() throws IOException {
+        String lang = languageFile();
+        assertTranslation(lang, "message.rail_beetle.route_blocked.unloaded",
+                "Rail Beetle stopped at %s: terrain is unloaded. Move closer.");
+        assertTranslation(lang, "message.rail_beetle.route_blocked.geometry",
+                "Rail Beetle stopped at %s: route geometry changed. Clear it or replan.");
+        assertTranslation(lang, "message.rail_beetle.route_blocked.materials",
+                "Rail Beetle stopped at %s: missing route materials. Restock it.");
+    }
+
     private static void assertTranslation(String lang, String key, String value) {
         assertTrue(lang.contains("\"" + key + "\": \"" + value + "\""),
                 () -> "expected explicit label for " + key);

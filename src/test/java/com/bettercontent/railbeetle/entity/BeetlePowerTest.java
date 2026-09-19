@@ -29,4 +29,11 @@ final class BeetlePowerTest {
         assertEquals(1, EngineKind.SOUL.nativeCost(20));
         assertEquals(1, EngineKind.SPIRIT.nativeCost(6_000));
     }
+
+    @Test void failedSecondSupportReturnsOnlyUncommittedMaterials() {
+        assertEquals(1, BeetleSupplies.unplacedSupportCount(2, 1));
+        assertEquals(2, BeetleSupplies.unplacedSupportCount(2, 0));
+        assertEquals(0, BeetleSupplies.unplacedSupportCount(2, 2));
+    }
+
 }

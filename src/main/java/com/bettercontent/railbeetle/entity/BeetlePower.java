@@ -5,6 +5,7 @@ import com.bettercontent.railbeetle.upgrade.BeetleProfile;
 import com.bettercontent.railbeetle.upgrade.EngineKind;
 import com.bettercontent.railbeetle.upgrade.WorkAction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
@@ -40,6 +41,8 @@ final class BeetlePower {
     static boolean consumeEngine(ItemStack engineStack, ItemStackHandler cargo, int work) {
         if (work <= 0) return true;
         if (!(engineStack.getItem() instanceof EngineItem engineItem)) return false;
+        CompoundTag engineBefore = engineStack.getTag() == null ? null : engineStack.getTag().copy();
+        ItemStack[] cargoBefore = snapshot(cargo);
         EngineKind kind = engineItem.kind();
         int credit = Math.max(0, engineStack.getOrCreateTag().getInt(CREDIT_TAG));
         while (credit < work) {
@@ -63,13 +66,27 @@ final class BeetlePower {
                 default -> nativeDraw;
             };
         }
-        if (credit < work) return false;
+        if (credit < work) {
+            restore(engineStack, cargo, engineBefore, cargoBefore);
+            return false;
+        }
         if (kind == EngineKind.STEAM && !consumeSteamWater(engineStack, cargo, work)) {
-            engineStack.getOrCreateTag().putInt(CREDIT_TAG, credit);
+            restore(engineStack, cargo, engineBefore, cargoBefore);
             return false;
         }
         engineStack.getOrCreateTag().putInt(CREDIT_TAG, credit - work);
         return true;
+    }
+
+    private static ItemStack[] snapshot(ItemStackHandler cargo) {
+        ItemStack[] stacks = new ItemStack[cargo.getSlots()];
+        for (int slot = 0; slot < stacks.length; slot++) stacks[slot] = cargo.getStackInSlot(slot).copy();
+        return stacks;
+    }
+
+    private static void restore(ItemStack engine, ItemStackHandler cargo, CompoundTag engineTag, ItemStack[] stacks) {
+        engine.setTag(engineTag == null ? null : engineTag.copy());
+        for (int slot = 0; slot < stacks.length; slot++) cargo.setStackInSlot(slot, stacks[slot]);
     }
 
     static boolean refillEngine(ItemStack engineStack, ItemStackHandler cargo) {

@@ -782,9 +782,9 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         return true;
     }
 
-    private void refundUnplaced(BlockItem railItem, List<BlockItem> supportItems, int firstUnplacedSupport) {
+    private void refundUnplaced(BlockItem railItem, List<BlockItem> supportItems, int committedSupports) {
         returnItem(new ItemStack(railItem));
-        for (int index = firstUnplacedSupport; index < supportItems.size(); index++) {
+        for (int index = committedSupports; index < supportItems.size(); index++) {
             returnItem(new ItemStack(supportItems.get(index)));
         }
     }

@@ -46,6 +46,11 @@ public final class BeetleSupplies {
         return total;
     }
 
+    /** Number of support items still owned by the beetle after committed placements. */
+    static int unplacedSupportCount(int totalSupports, int committedSupports) {
+        return Math.max(0, totalSupports - Math.max(0, committedSupports));
+    }
+
     @Nullable
     public static BlockItem takeRail(ItemStackHandler inventory) {
         return takeBlock(inventory, BeetleSupplies::isRail);

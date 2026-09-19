@@ -797,7 +797,10 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
             level().setBlock(step.railPos(), Blocks.AIR.defaultBlockState(), 3);
         for (BlockPos support : placedSupports) {
             BlockState authored = level().getBlockState(support);
-            if (!authored.isAir()) level().setBlock(support, Blocks.AIR.defaultBlockState(), 3);
+            // Only clear blocks still occupying the Beetle's placed support positions;
+            // intervening edits are left intact.
+            if (!authored.isAir() && supportItems.stream().anyMatch(item -> item.getBlock().defaultBlockState().is(authored.getBlock())))
+                level().setBlock(support, Blocks.AIR.defaultBlockState(), 3);
         }
         returnItem(new ItemStack(railItem));
         supportItems.forEach(item -> returnItem(new ItemStack(item)));

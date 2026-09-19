@@ -751,25 +751,32 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
                 return false;
             }
         }
+        List<BlockPos> placedSupports = new ArrayList<>();
         for (int index = 0; index < supportCount; index++) {
             if (!level().setBlock(step.supportPositions().get(index),
                     supportItems.get(index).getBlock().defaultBlockState(), 3)) {
-                rollbackPlacement(step, railItem, supportItems);
+                rollbackPlacement(step, railItem, supportItems, placedSupports, null);
                 invalidateRoute();
                 return false;
             }
+            placedSupports.add(step.supportPositions().get(index).immutable());
         }
         BaseRailBlock railBlock = (BaseRailBlock) railItem.getBlock();
         BlockState railState = railBlock.defaultBlockState().setValue(railBlock.getShapeProperty(), step.shape());
         if (!level().setBlock(step.railPos(), railState, 3)) {
-            rollbackPlacement(step, railItem, supportItems);
+            rollbackPlacement(step, railItem, supportItems, placedSupports, null);
             invalidateRoute();
             return false;
         }
+        int savedFuel = fuelTicks;
+        CompoundTag savedEngine = engine.getStackInSlot(0).getTag() == null ? null : engine.getStackInSlot(0).getTag().copy();
+        ItemStack[] savedCargo = snapshotInventory();
         if (!consumeWork(WorkAction.SUPPORT_PLACEMENT, supportCount * 2)
                 || !consumeWork(WorkAction.RAIL_PLACEMENT, 4)) {
-            level().setBlock(step.railPos(), Blocks.AIR.defaultBlockState(), 3);
-            rollbackPlacement(step, railItem, supportItems);
+            fuelTicks = savedFuel;
+            engine.getStackInSlot(0).setTag(savedEngine == null ? null : savedEngine.copy());
+            restoreInventory(savedCargo);
+            rollbackPlacement(step, railItem, supportItems, placedSupports, railState);
             invalidateRoute();
             return false;
         }
@@ -784,11 +791,26 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         }
     }
 
-    private void rollbackPlacement(RouteStep step, BlockItem railItem, List<BlockItem> supportItems) {
-        level().setBlock(step.railPos(), Blocks.AIR.defaultBlockState(), 3);
-        for (BlockPos support : step.supportPositions()) level().setBlock(support, Blocks.AIR.defaultBlockState(), 3);
+    private void rollbackPlacement(RouteStep step, BlockItem railItem, List<BlockItem> supportItems,
+                                   List<BlockPos> placedSupports, BlockState railState) {
+        if (railState != null && level().getBlockState(step.railPos()).equals(railState))
+            level().setBlock(step.railPos(), Blocks.AIR.defaultBlockState(), 3);
+        for (BlockPos support : placedSupports) {
+            BlockState authored = level().getBlockState(support);
+            if (!authored.isAir()) level().setBlock(support, Blocks.AIR.defaultBlockState(), 3);
+        }
         returnItem(new ItemStack(railItem));
         supportItems.forEach(item -> returnItem(new ItemStack(item)));
+    }
+
+    private ItemStack[] snapshotInventory() {
+        ItemStack[] result = new ItemStack[inventory.getSlots()];
+        for (int i = 0; i < result.length; i++) result[i] = inventory.getStackInSlot(i).copy();
+        return result;
+    }
+
+    private void restoreInventory(ItemStack[] stacks) {
+        for (int i = 0; i < stacks.length; i++) inventory.setStackInSlot(i, stacks[i]);
     }
 
     private boolean builtSupportsIntact() {

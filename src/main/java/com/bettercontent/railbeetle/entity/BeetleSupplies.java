@@ -3,6 +3,7 @@ package com.bettercontent.railbeetle.entity;
 import com.bettercontent.railbeetle.RailBeetleTags;
 import com.bettercontent.railbeetle.navigation.RouteProposal;
 import com.bettercontent.railbeetle.navigation.RouteSupplyStatus;
+import com.bettercontent.railbeetle.navigation.RouteStep;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
@@ -74,6 +75,17 @@ public final class BeetleSupplies {
 
     public static RouteSupplyStatus supplyStatus(ItemStackHandler inventory, int bufferedFuelTicks,
                                                   RouteProposal route) {
+        return supplyStatus(inventory, bufferedFuelTicks, route.steps());
+    }
+
+    /**
+     * Simulates only the construction which has not already been completed.
+     * A Beetle evaluates this again while it lays a route, so charging the original
+     * route after each committed rail would report a shortage for materials already
+     * consumed by that same route.
+     */
+    public static RouteSupplyStatus supplyStatus(ItemStackHandler inventory, int bufferedFuelTicks,
+                                                  Iterable<RouteStep> steps) {
         ItemStackHandler simulated = new ItemStackHandler(inventory.getSlots());
         for (int slot = 0; slot < inventory.getSlots(); slot++) {
             simulated.setStackInSlot(slot, inventory.getStackInSlot(slot).copy());
@@ -81,7 +93,7 @@ public final class BeetleSupplies {
         boolean missingFuel = bufferedFuelTicks <= 0 && takeFuel(simulated) <= 0;
         int missingRails = 0;
         int missingSupports = 0;
-        for (var step : route.steps()) {
+        for (RouteStep step : steps) {
             if (takeRail(simulated, step.shape()) == null) missingRails++;
             for (int support = 0; support < step.supportPositions().size(); support++) {
                 if (takeSupport(simulated) == null) missingSupports++;

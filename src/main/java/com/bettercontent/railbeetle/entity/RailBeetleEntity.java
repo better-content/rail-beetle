@@ -294,11 +294,19 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         if (!level().isLoaded(pos) || !level().isLoaded(pos.above()) || !level().isLoaded(pos.below())) {
             return new RouteBlocker(pos, RouteBlocker.Kind.UNLOADED_TERRAIN, RouteBlocker.Action.MOVE_CLOSER);
         }
-        RouteSupplyStatus supplies = supplyStatus(activeRoute);
+        if (placedRouteRails.contains(pos)) {
+            return supportsIntact(step) ? null
+                    : new RouteBlocker(pos, RouteBlocker.Kind.GEOMETRY, RouteBlocker.Action.CLEAR_OR_REPLAN);
+        }
+        List<RouteStep> remainingPlacements = activeRoute.steps().subList(stepIndex, activeRoute.steps().size()).stream()
+                .filter(candidate -> !(level().getBlockState(candidate.railPos()).getBlock() instanceof BaseRailBlock))
+                .toList();
+        RouteSupplyStatus supplies = BeetleSupplies.supplyStatus(inventory,
+                engineResource() > 0 ? 1 : fuelTicks, remainingPlacements);
         if (supplies.hasMissing()) {
             return new RouteBlocker(pos, RouteBlocker.Kind.MATERIAL_SHORTAGE, RouteBlocker.Action.RESTOCK);
         }
-        if (!TerrainRoutePlanner.isRouteStepStillValid(level(), activeRoute, activeStep)) {
+        if (!TerrainRoutePlanner.isRouteStepStillValid(level(), activeRoute, stepIndex)) {
             return new RouteBlocker(pos, RouteBlocker.Kind.GEOMETRY, RouteBlocker.Action.CLEAR_OR_REPLAN);
         }
         return null;

@@ -600,8 +600,8 @@ public final class RailBeetleGameTests {
                     "Beetle must not consume fuel from a coupled freight cart");
             helper.assertTrue(freight.getItem(0).is(net.minecraft.world.item.Items.COAL),
                     "coupled freight must retain its coal when Beetle working supplies are empty");
-            helper.assertTrue(beetle.mode() == BeetleMode.PAUSED,
-                    "Beetle must pause when its own working supplies cannot power travel");
+            helper.assertTrue(beetle.mode() == BeetleMode.STOPPED,
+                    "a manual Beetle must stop when its own working supplies cannot power travel");
             helper.succeed();
         });
     }

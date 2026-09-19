@@ -754,27 +754,22 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         for (int index = 0; index < supportCount; index++) {
             if (!level().setBlock(step.supportPositions().get(index),
                     supportItems.get(index).getBlock().defaultBlockState(), 3)) {
-                refundUnplaced(railItem, supportItems, index);
+                rollbackPlacement(step, railItem, supportItems);
                 invalidateRoute();
-                return false;
-            }
-            if (!consumeWork(WorkAction.SUPPORT_PLACEMENT, 2)) {
-                level().setBlock(step.supportPositions().get(index), Blocks.AIR.defaultBlockState(), 3);
-                refundUnplaced(railItem, supportItems, index);
-                if (index == 0) pause(); else invalidateRoute();
                 return false;
             }
         }
         BaseRailBlock railBlock = (BaseRailBlock) railItem.getBlock();
         BlockState railState = railBlock.defaultBlockState().setValue(railBlock.getShapeProperty(), step.shape());
         if (!level().setBlock(step.railPos(), railState, 3)) {
-            returnItem(new ItemStack(railItem));
+            rollbackPlacement(step, railItem, supportItems);
             invalidateRoute();
             return false;
         }
-        if (!consumeWork(WorkAction.RAIL_PLACEMENT, 4)) {
+        if (!consumeWork(WorkAction.SUPPORT_PLACEMENT, supportCount * 2)
+                || !consumeWork(WorkAction.RAIL_PLACEMENT, 4)) {
             level().setBlock(step.railPos(), Blocks.AIR.defaultBlockState(), 3);
-            returnItem(new ItemStack(railItem));
+            rollbackPlacement(step, railItem, supportItems);
             invalidateRoute();
             return false;
         }
@@ -787,6 +782,13 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         for (int index = committedSupports; index < supportItems.size(); index++) {
             returnItem(new ItemStack(supportItems.get(index)));
         }
+    }
+
+    private void rollbackPlacement(RouteStep step, BlockItem railItem, List<BlockItem> supportItems) {
+        level().setBlock(step.railPos(), Blocks.AIR.defaultBlockState(), 3);
+        for (BlockPos support : step.supportPositions()) level().setBlock(support, Blocks.AIR.defaultBlockState(), 3);
+        returnItem(new ItemStack(railItem));
+        supportItems.forEach(item -> returnItem(new ItemStack(item)));
     }
 
     private boolean builtSupportsIntact() {

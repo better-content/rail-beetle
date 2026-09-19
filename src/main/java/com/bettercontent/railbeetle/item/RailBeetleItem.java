@@ -27,6 +27,9 @@ public final class RailBeetleItem extends Item {
             beetle.setPos(railPos.getX() + 0.5, railPos.getY() + 0.0625, railPos.getZ() + 0.5);
             beetle.setYRot(context.getRotation());
             beetle.setInitialHeading(Direction.fromYRot(context.getRotation()));
+            if (StarterBeetlePackage.requested(context.getItemInHand())) {
+                StarterBeetlePackage.install(beetle);
+            }
             level.addFreshEntity(beetle);
             if (context.getPlayer() == null || !context.getPlayer().getAbilities().instabuild) {
                 context.getItemInHand().shrink(1);

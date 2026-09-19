@@ -291,25 +291,18 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         if (activeRoute == null || stepIndex < 0 || stepIndex >= activeRoute.steps().size()) return null;
         RouteStep step = activeRoute.steps().get(stepIndex);
         BlockPos pos = step.railPos();
-        if (!level().isLoaded(pos) || !level().isLoaded(pos.above()) || !level().isLoaded(pos.below())) {
-            return new RouteBlocker(pos, RouteBlocker.Kind.UNLOADED_TERRAIN, RouteBlocker.Action.MOVE_CLOSER);
-        }
+        if (!level().isLoaded(pos) || !level().isLoaded(pos.above()) || !level().isLoaded(pos.below()))
+            return RouteBlocker.classify(pos, false, true, RouteSupplyStatus.READY, true);
         if (placedRouteRails.contains(pos)) {
-            return supportsIntact(step) ? null
-                    : new RouteBlocker(pos, RouteBlocker.Kind.GEOMETRY, RouteBlocker.Action.CLEAR_OR_REPLAN);
+            return RouteBlocker.classify(pos, true, supportsIntact(step), RouteSupplyStatus.READY, true);
         }
         List<RouteStep> remainingPlacements = activeRoute.steps().subList(stepIndex, activeRoute.steps().size()).stream()
-                .filter(candidate -> !(level().getBlockState(candidate.railPos()).getBlock() instanceof BaseRailBlock))
+                .filter(candidate -> !placedRouteRails.contains(candidate.railPos()))
                 .toList();
         RouteSupplyStatus supplies = BeetleSupplies.supplyStatus(inventory,
                 engineResource() > 0 ? 1 : fuelTicks, remainingPlacements);
-        if (supplies.hasMissing()) {
-            return new RouteBlocker(pos, RouteBlocker.Kind.MATERIAL_SHORTAGE, RouteBlocker.Action.RESTOCK);
-        }
-        if (!TerrainRoutePlanner.isRouteStepStillValid(level(), activeRoute, stepIndex)) {
-            return new RouteBlocker(pos, RouteBlocker.Kind.GEOMETRY, RouteBlocker.Action.CLEAR_OR_REPLAN);
-        }
-        return null;
+        return RouteBlocker.classify(pos, true, true, supplies,
+                TerrainRoutePlanner.isRouteStepStillValid(level(), activeRoute, stepIndex));
     }
 
     public void setInitialHeading(Direction heading) {
@@ -759,21 +752,28 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
             }
         }
         for (int index = 0; index < supportCount; index++) {
-            if (!consumeWork(WorkAction.SUPPORT_PLACEMENT, 2)) {
-                refundUnplaced(railItem, supportItems, index);
-                if (index == 0) pause(); else invalidateRoute();
-                return false;
-            }
             if (!level().setBlock(step.supportPositions().get(index),
                     supportItems.get(index).getBlock().defaultBlockState(), 3)) {
                 refundUnplaced(railItem, supportItems, index);
                 invalidateRoute();
                 return false;
             }
+            if (!consumeWork(WorkAction.SUPPORT_PLACEMENT, 2)) {
+                level().setBlock(step.supportPositions().get(index), Blocks.AIR.defaultBlockState(), 3);
+                refundUnplaced(railItem, supportItems, index);
+                if (index == 0) pause(); else invalidateRoute();
+                return false;
+            }
         }
         BaseRailBlock railBlock = (BaseRailBlock) railItem.getBlock();
         BlockState railState = railBlock.defaultBlockState().setValue(railBlock.getShapeProperty(), step.shape());
-        if (!consumeWork(WorkAction.RAIL_PLACEMENT, 4) || !level().setBlock(step.railPos(), railState, 3)) {
+        if (!level().setBlock(step.railPos(), railState, 3)) {
+            returnItem(new ItemStack(railItem));
+            invalidateRoute();
+            return false;
+        }
+        if (!consumeWork(WorkAction.RAIL_PLACEMENT, 4)) {
+            level().setBlock(step.railPos(), Blocks.AIR.defaultBlockState(), 3);
             returnItem(new ItemStack(railItem));
             invalidateRoute();
             return false;

@@ -112,17 +112,18 @@ public final class RailBeetleClient {
                 detail = Component.translatable("hud.rail_beetle.route", routeName,
                         route.railCount(), route.supportCount());
                 if (target.supply().hasMissing()) {
-                    action = Component.translatable("hud.rail_beetle.follow_missing", missingSupplies(target.supply()));
+                    action = Component.translatable("hud.rail_beetle.follow_missing",
+                            SELECT_ROUTE.getTranslatedKeyMessage(), missingSupplies(target.supply()));
                     actionColor = 0xffff5555;
                 } else {
-                    action = Component.translatable("hud.rail_beetle.follow");
+                    action = Component.translatable("hud.rail_beetle.follow", SELECT_ROUTE.getTranslatedKeyMessage());
                 }
             } else if (target.action() == ClientRouteStore.Action.STOP) {
                 detail = Component.translatable("hud.rail_beetle.active");
-                action = Component.translatable("hud.rail_beetle.stop");
+                action = Component.translatable("hud.rail_beetle.stop", SELECT_ROUTE.getTranslatedKeyMessage());
             } else {
                 detail = Component.translatable("hud.rail_beetle.stopped");
-                action = Component.translatable("hud.rail_beetle.clear");
+                action = Component.translatable("hud.rail_beetle.clear", SELECT_ROUTE.getTranslatedKeyMessage());
             }
 
             int width = Math.max(minecraft.font.width(detail), minecraft.font.width(action)) + 8;

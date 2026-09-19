@@ -51,6 +51,15 @@ final class RailBeetleInterfaceResourceTest {
                 "Rail Beetle stopped at %s: missing route materials. Restock it.");
     }
 
+    @Test void routeHudPromptsAcceptTheCurrentKeyBinding() throws IOException {
+        String lang = languageFile();
+        assertTranslation(lang, "hud.rail_beetle.follow", "[%s] Follow route");
+        assertTranslation(lang, "hud.rail_beetle.follow_missing", "[%s] Follow · Missing %s");
+        assertTranslation(lang, "hud.rail_beetle.stop", "[%s] Stop");
+        assertTranslation(lang, "hud.rail_beetle.clear", "[%s] Clear route & replan");
+        assertTrue(!lang.contains("[G]"), "route HUD must not name a stale fixed key");
+    }
+
     private static void assertTranslation(String lang, String key, String value) {
         assertTrue(lang.contains("\"" + key + "\": \"" + value + "\""),
                 () -> "expected explicit label for " + key);

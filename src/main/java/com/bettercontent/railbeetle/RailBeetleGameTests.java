@@ -3,6 +3,7 @@ package com.bettercontent.railbeetle;
 import com.bettercontent.railbeetle.entity.RailBeetleEntity;
 import com.bettercontent.railbeetle.entity.BeetleMode;
 import com.bettercontent.railbeetle.entity.BeetleSupplies;
+import com.bettercontent.railbeetle.item.StarterBeetlePackage;
 import com.bettercontent.railbeetle.navigation.RouteProposal;
 import com.bettercontent.railbeetle.navigation.RouteKind;
 import com.bettercontent.railbeetle.navigation.RouteObstructions;
@@ -20,12 +21,15 @@ import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.entity.vehicle.Minecart;
 import net.minecraft.world.entity.vehicle.MinecartChest;
 import net.minecraft.world.level.block.BaseRailBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.RailShape;
+import net.minecraft.world.phys.AABB;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.gametest.GameTestHolder;
 import net.minecraftforge.gametest.PrefixGameTestTemplate;
@@ -46,6 +50,35 @@ public final class RailBeetleGameTests {
     private static final String TEMPLATE = "empty";
 
     private RailBeetleGameTests() {}
+
+    @GameTest(templateNamespace = RailBeetleMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void foundBeetleDropsBodyAndUnspentStarterSupplies(GameTestHelper helper) {
+        RailBeetleEntity beetle = RailBeetleRegistries.RAIL_BEETLE_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(beetle != null, "Found Beetle entity must resolve");
+        BlockPos site = helper.absolutePos(new BlockPos(2, 2, 2));
+        beetle.setPos(site.getX() + 0.5, site.getY(), site.getZ() + 0.5);
+        StarterBeetlePackage.install(beetle);
+        helper.getLevel().addFreshEntity(beetle);
+        beetle.destroy(helper.getLevel().damageSources().generic());
+        helper.succeedWhen(() -> {
+            var drops = helper.getLevel().getEntitiesOfClass(ItemEntity.class, new AABB(site).inflate(4));
+            helper.assertTrue(countDrops(drops, RailBeetleRegistries.RAIL_BEETLE_ITEM.get()) == 1,
+                    "Found Beetle body must remain recoverable exactly once");
+            helper.assertTrue(countDrops(drops, Blocks.RAIL.asItem()) == 32,
+                    "Unspent starter rails must be recoverable");
+            helper.assertTrue(countDrops(drops, Blocks.COBBLESTONE.asItem()) == 16,
+                    "Unspent starter supports must be recoverable");
+            helper.assertTrue(countDrops(drops, Items.COAL) == 8,
+                    "Unspent starter fuel must be recoverable");
+            helper.assertTrue(drops.stream().filter(drop -> drop.getItem().is(RailBeetleRegistries.RAIL_BEETLE_ITEM.get()))
+                            .noneMatch(drop -> StarterBeetlePackage.requested(drop.getItem())),
+                    "Recovered body must not mint another starter package");
+        });
+    }
+
+    private static int countDrops(List<ItemEntity> drops, net.minecraft.world.item.Item item) {
+        return drops.stream().filter(drop -> drop.getItem().is(item)).mapToInt(drop -> drop.getItem().getCount()).sum();
+    }
 
     @GameTest(templateNamespace = RailBeetleMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
     public static void caveIntegrationDependenciesAreLoaded(GameTestHelper helper) {

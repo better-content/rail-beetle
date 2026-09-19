@@ -311,6 +311,7 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         normalizeState(rail);
         boolean brake = shouldBrake();
         applyAutomaticBrake(brake);
+        tickSearchlight();
         if (brake || mode == BeetleMode.NEUTRAL) return;
         boolean commanded = switch (mode) {
             case DEPARTING, AUTO_BUILD -> prepareAutomaticMovement(rail);
@@ -649,7 +650,8 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         EngineKind kind = engineKind();
         int work = BeetlePower.adjustedWork(action, rawWork, profile(), kind);
         ItemStack engineStack = engine.getStackInSlot(0);
-        if (!engineStack.isEmpty() && BeetlePower.consumeEngine(engineStack, inventory, work)) {
+        if (!engineStack.isEmpty()) {
+            if (!BeetlePower.consumeEngine(engineStack, inventory, work)) return false;
             if (action == WorkAction.MOTION && (kind == EngineKind.SOURCE || kind == EngineKind.LIFEFORCE
                     || kind == EngineKind.SOUL || kind == EngineKind.SPIRIT)) discoveryMotionEngine = kind;
             return true;
@@ -705,13 +707,6 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
             pause();
             return false;
         }
-        if (!consumeWork(WorkAction.RAIL_PLACEMENT, 4)
-                || (needsSupport && !consumeWork(WorkAction.SUPPORT_PLACEMENT, 2 * supportCount))) {
-            returnItem(new ItemStack(railItem));
-            supportItems.forEach(item -> returnItem(new ItemStack(item)));
-            pause();
-            return false;
-        }
         if (!clearRouteObstruction(step.railPos()) || !clearRouteObstruction(step.railPos().above())) {
             returnItem(new ItemStack(railItem));
             supportItems.forEach(item -> returnItem(new ItemStack(item)));
@@ -727,21 +722,34 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
             }
         }
         for (int index = 0; index < supportCount; index++) {
+            if (!consumeWork(WorkAction.SUPPORT_PLACEMENT, 2)) {
+                refundUnplaced(railItem, supportItems, index);
+                if (index == 0) pause(); else invalidateRoute();
+                return false;
+            }
             if (!level().setBlock(step.supportPositions().get(index),
                     supportItems.get(index).getBlock().defaultBlockState(), 3)) {
+                refundUnplaced(railItem, supportItems, index);
                 invalidateRoute();
                 return false;
             }
         }
         BaseRailBlock railBlock = (BaseRailBlock) railItem.getBlock();
         BlockState railState = railBlock.defaultBlockState().setValue(railBlock.getShapeProperty(), step.shape());
-        if (!level().setBlock(step.railPos(), railState, 3)) {
+        if (!consumeWork(WorkAction.RAIL_PLACEMENT, 4) || !level().setBlock(step.railPos(), railState, 3)) {
             returnItem(new ItemStack(railItem));
             invalidateRoute();
             return false;
         }
         placedRouteRails.add(step.railPos().immutable());
         return true;
+    }
+
+    private void refundUnplaced(BlockItem railItem, List<BlockItem> supportItems, int firstUnplacedSupport) {
+        returnItem(new ItemStack(railItem));
+        for (int index = firstUnplacedSupport; index < supportItems.size(); index++) {
+            returnItem(new ItemStack(supportItems.get(index)));
+        }
     }
 
     private boolean builtSupportsIntact() {
@@ -1198,6 +1206,9 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
         entityData.set(DATA_ENGINE, engineKind().ordinal());
         entityData.set(DATA_ENGINE_RESOURCE, engineResource());
         entityData.set(DATA_MODULES, moduleMask());
+    }
+
+    private void tickSearchlight() {
         if (searchlightOn() && level().getGameTime() % 20 == 0
                 && !consumeWork(WorkAction.SEARCHLIGHT, 1)) {
             entityData.set(DATA_SEARCHLIGHT, false);

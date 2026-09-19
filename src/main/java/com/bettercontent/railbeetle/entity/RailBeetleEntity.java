@@ -9,6 +9,7 @@ import com.bettercontent.railbeetle.menu.RemoteBeetleMenu;
 import com.bettercontent.railbeetle.navigation.RouteProposal;
 import com.bettercontent.railbeetle.navigation.RouteKind;
 import com.bettercontent.railbeetle.navigation.RouteSupplyStatus;
+import com.bettercontent.railbeetle.navigation.RouteBlocker;
 import com.bettercontent.railbeetle.navigation.RouteStep;
 import com.bettercontent.railbeetle.navigation.RouteObstructions;
 import com.bettercontent.railbeetle.navigation.TerrainRoutePlanner;
@@ -280,6 +281,23 @@ public final class RailBeetleEntity extends Minecart implements MenuProvider {
     @Nullable public RouteProposal activeRoute() { return activeRoute; }
     public RouteSupplyStatus supplyStatus(RouteProposal route) {
         return BeetleSupplies.supplyStatus(inventory, engineResource() > 0 ? 1 : fuelTicks, route);
+    }
+
+    @Nullable public RouteBlocker routeBlocker() {
+        if (activeRoute == null || activeStep >= activeRoute.steps().size()) return null;
+        RouteStep step = activeRoute.steps().get(activeStep);
+        BlockPos pos = step.railPos();
+        if (!level().isLoaded(pos) || !level().isLoaded(pos.above()) || !level().isLoaded(pos.below())) {
+            return new RouteBlocker(pos, RouteBlocker.Kind.UNLOADED_TERRAIN, RouteBlocker.Action.MOVE_CLOSER);
+        }
+        RouteSupplyStatus supplies = supplyStatus(activeRoute);
+        if (supplies.hasMissing()) {
+            return new RouteBlocker(pos, RouteBlocker.Kind.MATERIAL_SHORTAGE, RouteBlocker.Action.RESTOCK);
+        }
+        if (!TerrainRoutePlanner.isRouteStepStillValid(level(), activeRoute, activeStep)) {
+            return new RouteBlocker(pos, RouteBlocker.Kind.GEOMETRY, RouteBlocker.Action.CLEAR_OR_REPLAN);
+        }
+        return null;
     }
 
     public void setInitialHeading(Direction heading) {

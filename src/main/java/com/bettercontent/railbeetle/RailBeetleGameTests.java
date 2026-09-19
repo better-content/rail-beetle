@@ -22,6 +22,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.vehicle.Minecart;
+import net.minecraft.world.entity.vehicle.MinecartChest;
 import net.minecraft.world.level.block.BaseRailBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.RailShape;
@@ -568,6 +569,39 @@ public final class RailBeetleGameTests {
                 helper.assertTrue(delta > -0.005 && delta < 0.65,
                         "coupled hill movement must not roll backward or snap; delta=" + delta);
             }
+            helper.succeed();
+        });
+    }
+
+    @GameTest(templateNamespace = RailBeetleMod.MOD_ID, template = TEMPLATE, timeoutTicks = 100)
+    public static void coupledFreightNeverSuppliesBeetleWork(GameTestHelper helper) {
+        BlockPos rail = helper.absolutePos(new BlockPos(6, 2, 16));
+        placeEastWestRail(helper, rail);
+        placeEastWestRail(helper, rail.east());
+        RailBeetleEntity beetle = RailBeetleRegistries.RAIL_BEETLE_ENTITY.get().create(helper.getLevel());
+        helper.assertTrue(beetle != null, "Beetle entity type must create");
+        beetle.setPos(rail.getX() + 0.5, rail.getY() + 0.0625, rail.getZ() + 0.5);
+        beetle.setInitialHeading(Direction.EAST);
+        MinecartChest freight = new MinecartChest(helper.getLevel(),
+                rail.getX() - 1.5, rail.getY() + 0.0625, rail.getZ() + 0.5);
+        freight.setItem(0, new ItemStack(net.minecraft.world.item.Items.COAL));
+        helper.getLevel().addFreshEntity(beetle);
+        helper.getLevel().addFreshEntity(freight);
+        net.minecraft.world.entity.player.Player player = helper.makeMockPlayer();
+        player.setPos(beetle.getX(), beetle.getY(), beetle.getZ() + 1.0);
+
+        helper.runAfterDelay(2, () -> {
+            helper.assertTrue(CouplingHandler.tryToCoupleCarts(null, helper.getLevel(), beetle.getId(), freight.getId()),
+                    "Create must couple the freight cart to the Rail Beetle");
+            beetle.control(player, BeetleControl.NORMAL_SPEED);
+        });
+        helper.runAfterDelay(30, () -> {
+            helper.assertTrue(beetle.fuelTicks() == 0,
+                    "Beetle must not consume fuel from a coupled freight cart");
+            helper.assertTrue(freight.getItem(0).is(net.minecraft.world.item.Items.COAL),
+                    "coupled freight must retain its coal when Beetle working supplies are empty");
+            helper.assertTrue(beetle.mode() == BeetleMode.PAUSED,
+                    "Beetle must pause when its own working supplies cannot power travel");
             helper.succeed();
         });
     }

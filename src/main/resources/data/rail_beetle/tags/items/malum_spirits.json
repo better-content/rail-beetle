@@ -1,13 +1,14 @@
 {
   "replace": false,
   "values": [
-    { "id": "malum:sacred_spirit", "required": false },
-    { "id": "malum:wicked_spirit", "required": false },
-    { "id": "malum:arcane_spirit", "required": false },
-    { "id": "malum:earthen_spirit", "required": false },
-    { "id": "malum:aerial_spirit", "required": false },
-    { "id": "malum:aqueous_spirit", "required": false },
-    { "id": "malum:infernal_spirit", "required": false },
+    { "id": "better_content_economy:renewal_spirit", "required": false },
+    { "id": "better_content_economy:control_spirit", "required": false },
+    { "id": "better_content_economy:work_spirit", "required": false },
+    { "id": "better_content_economy:robustness_spirit", "required": false },
+    { "id": "better_content_economy:mobility_spirit", "required": false },
+    { "id": "better_content_economy:endurance_spirit", "required": false },
+    { "id": "better_content_economy:impact_spirit", "required": false },
+    { "id": "better_content_economy:tempo_spirit", "required": false },
     { "id": "malum:eldritch_spirit", "required": false },
     { "id": "malum:umbral_spirit", "required": false }
   ]
